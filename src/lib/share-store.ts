@@ -53,10 +53,15 @@ declare global {
  * Geçici MVP adapter'ı: tek Node sürecinin belleğinde yaşar. Gerçek production
  * dağıtımı için bunun yerine paylaşılan, kalıcı bir database/object storage adapter'ı gerekir.
  */
+export function shouldUseSupabase(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env.SUPABASE_URL && env.SUPABASE_SECRET_KEY);
+}
+
 export function getShareStore(env: NodeJS.ProcessEnv = process.env): ShareStore {
-  if (env.NODE_ENV === "production") {
+  if (shouldUseSupabase(env)) {
     const config = getShareStorageConfig(env);
     return new SupabaseShareStore(createSupabaseShareDriver(config), config.ttlDays);
   }
+  if (env.NODE_ENV === "production") throw new Error("Supabase paylaşım storage yapılandırması eksik.");
   return globalThis.dijivoShareStore ?? (globalThis.dijivoShareStore = new InMemoryShareStore());
 }

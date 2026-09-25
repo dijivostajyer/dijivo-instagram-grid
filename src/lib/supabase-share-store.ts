@@ -12,7 +12,7 @@ import { getShareStorageConfig, type ShareStorageConfig } from "./share-config";
 import { generateShareToken, isValidShareToken } from "./share-token";
 import type { ShareStore } from "./share-store";
 
-type SnapshotRow = { token: string; payload: unknown; expires_at: string; revoked_at: string | null };
+export type SnapshotRow = { token: string; version: number; created_at: string; payload: unknown; expires_at: string; revoked_at: string | null };
 
 export interface SupabaseShareDriver {
   upload(path: string, body: Uint8Array, contentType: string): Promise<void>;
@@ -55,7 +55,7 @@ export class SupabaseShareStore implements ShareStore {
         const converted = await this.uploadDataImages(input, token, uploaded);
         const createdAt = this.now();
         const snapshot = createShareSnapshot(converted, token, createdAt.toISOString());
-        await this.driver.insert({ token, payload: snapshot, expires_at: addDays(createdAt, this.ttlDays).toISOString(), revoked_at: null });
+        await this.driver.insert({ token, version: snapshot.version, created_at: snapshot.createdAt, payload: snapshot, expires_at: addDays(createdAt, this.ttlDays).toISOString(), revoked_at: null });
         return this.resolveStorageImages(snapshot);
       } catch (error) {
         lastError = error;
@@ -118,7 +118,7 @@ export function createSupabaseShareDriver(config: ShareStorageConfig = getShareS
     async upload(path, body, contentType) { const { error } = await client.storage.from(config.bucket).upload(path, body, { contentType, upsert: false }); if (error) throw new Error("Storage upload başarısız."); },
     async remove(paths) { const { error } = await client.storage.from(config.bucket).remove(paths); if (error) throw new Error("Storage cleanup başarısız."); },
     async insert(row) { const { error } = await client.from("share_snapshots").insert(row); if (error) throw new Error(error.code === "23505" ? "duplicate token" : "Snapshot insert başarısız."); },
-    async find(token) { const { data, error } = await client.from("share_snapshots").select("token,payload,expires_at,revoked_at").eq("token", token).maybeSingle(); if (error) throw new Error("Snapshot okuma başarısız."); return data as SnapshotRow | null; },
+    async find(token) { const { data, error } = await client.from("share_snapshots").select("token,version,created_at,payload,expires_at,revoked_at").eq("token", token).maybeSingle(); if (error) throw new Error("Snapshot okuma başarısız."); return data as SnapshotRow | null; },
     async sign(path, seconds) { const { data, error } = await client.storage.from(config.bucket).createSignedUrl(path, seconds); if (error || !data) throw new Error("Signed URL üretilemedi."); return data.signedUrl; },
     async revoke(token, revokedAt) { const { error } = await client.from("share_snapshots").update({ revoked_at: revokedAt }).eq("token", token); if (error) throw new Error("Snapshot revoke başarısız."); },
   };
