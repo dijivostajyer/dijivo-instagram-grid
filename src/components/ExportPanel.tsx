@@ -2,21 +2,17 @@
 
 import { useCallback, useRef, useState } from "react";
 
-import {
-  ArrowDownTrayIcon,
-  DocumentTextIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, DocumentTextIcon } from "@heroicons/react/24/outline";
 import type { Brand, GridResult } from "@/lib/types";
 import {
-  buildCanvas,
   buildExportData,
   buildFileName,
-  buildPdfBytes,
   buildJpgBytes,
+  buildPdfBytes,
   slugify,
 } from "@/lib/export";
 
-/** Exportunu başlattığımızda kullanıcıya kısa bir yükleniyor durumu gösterir. */
+/** Exportnu başlattığımızda kullanıcıya kısa bir yükleniyor durumu gösterir. */
 export interface ExportStep {
   key: string;
   fileName: string;
@@ -153,6 +149,15 @@ export default function ExportPanel({
           JPG İndir
         </button>
       </div>
+
+      {steps.some((s) => s.error) ? (
+        <p role="alert" className="mt-3 text-xs font-medium text-red-600">
+          {steps.find((s) => s.error)?.error}
+        </p>
+      ) : null}
+      {steps.every((s) => s.done) ? (
+        <p className="mt-3 text-xs text-green-700">Dosyalar indirildi.</p>
+      ) : null}
     </section>
   );
 }

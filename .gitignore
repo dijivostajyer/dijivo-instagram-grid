@@ -18,6 +18,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# runtime/debug logs (tracked accidentally in main history; do not commit)
+dev.log
+*.log
+
 # env files (gizli bilgiler asla commit edilmez)
 .env*
 !.env.example

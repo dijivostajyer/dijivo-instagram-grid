@@ -122,6 +122,11 @@ export default function GridManager() {
   }
 
   const canPinMore = grid.pinnedCount < MAX_PINNED;
+  // Export, UI'da görülen sırayı aynen almalı: grid cellsdeki imageUrl'ler.
+  const imageUrls = useMemo(
+    () => grid.cells.map((cell) => Promise.resolve(cell.post.imageUrl)),
+    [grid],
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -207,7 +212,7 @@ export default function GridManager() {
           <ExportPanel
             brand={brand}
             result={grid}
-            imageUrls={[]}
+            imageUrls={imageUrls}
             options={{
               download: async (fileName, blob) => {
                 const url = URL.createObjectURL(blob);
@@ -220,7 +225,9 @@ export default function GridManager() {
                 URL.revokeObjectURL(url);
               },
               showError: (message) => {
-                alert(message);
+                // Inline error is rendered by ExportPanel; a blocking alert()
+                // would freeze the UI thread during export failures.
+                console.error("[export]", message);
               },
             }}
           />

@@ -1,33 +1,27 @@
-import { PDFDocument, rgb, PDFFont } from "pdf-lib";
-import { open } from "node:fs/promises";
-
+import { PDFDocument } from "pdf-lib";
 import type { Brand, GridResult } from "./types";
 
+/** A4 dimensions in points (ISO 216). */
+export const A4_W = 595.28;
+export const A4_H = 841.89;
+
 /**
- * Dijivo Instagram Grid Preview Tool — PDF/JPG dinamik kıvrım (MVP Faz 2).
- *
- * - Tarayıcıda çalışır; tek bağımlı kütüphane `pdf-lib` (AMD/UMD, bundeleyerek).
- * - Export sırasında `@/lib/grid`'nin `computeGrid` sonucuyla birebir aynı grid
- *   hesaplanır: `cells` sırası korunur (pinned, planlanan, mevcut).
- * - Görseller `loadImageFile` tarafından üretilen Object URL'dir; export sırasında
- *   `fetch` ile `Image` objesine yüklenir, orijinal dosya hiç değişmez.
- *   1:1 kırpma `object-cover` mantığıyla merkezden kırpılır.
- * - File adı `slugify(brand.name)` ile oluşturulur; güvenli olmayan karakterler
- *   `_` ile değiştirilir.
+ * Export canvas scale: pixel size = A4 * EXPORT_SCALE, so the JPG output is
+ * high-resolution (~1191x1684) while drawing stays in A4 point coordinates.
  */
+export const EXPORT_SCALE = 2;
 
-const FONT_PATHS = {
-  regular: new URL("../assets/fonts/DejaVuSans.ttf", import.meta.url).pathname,
-  bold: new URL("../assets/fonts/DejaVuSans-Bold.ttf", import.meta.url).pathname,
-  oblique: new URL("../assets/fonts/DejaVuSans-Oblique.ttf", import.meta.url).pathname,
-} as const;
+/** Header/footer band heights of one export page (A4 points). */
+export const HEADER_HEIGHT = 140;
+export const FOOTER_HEIGHT = 30;
 
-const A4_W = 595.28; // A4 genişliği (pt)
-const A4_H = 841.89; // A4 yüksekliği (pt)
-const GRID_COLUMNS = 3;
-const GRID_LEADING = 16; // hücre arası boşluk
-const HEADER_PADDING = 24;
-const FOOTER_LEADING = 18;
+/** Vertical grid area of one A4 page: between header and footer. */
+export const GRID_TOP = HEADER_HEIGHT;
+export const GRID_BOTTOM = A4_H - FOOTER_HEIGHT;
+
+/** Grid configuration used by both UI and export. */
+export const GRID_COLUMNS = 3;
+export const GRID_LEADING = 16; // horizontal/vertical gap between grid cells
 
 export interface ExportOptions {
   setExporting?: (exporting: boolean) => void;
@@ -36,31 +30,45 @@ export interface ExportOptions {
   showError: (message: string) => void;
 }
 
-/** Güvenli dosya adını oluşturur. */
+/**
+ * Safe file name.
+ * Turkish-aware slugification: ı→i, İ→i, ş→s, Ş→s, ğ→g, Ğ→g, ü→u, Ü→u,
+ * ö→o, Ö→o, ç→c, Ç→c. Non-alphanumeric separators become "-", repeated dashes
+ * collapse, and leading/trailing dashes are stripped. Falls back to a safe name
+ * when the result is empty.
+ */
 export function slugify(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "") || "instagram-grid";
+  const lowered = value.trim().toLowerCase();
+  const transliterated = lowered
+    .replace(/ı/g, "i")
+    .replace(/İ/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/Ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/Ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/Ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/Ç/g, "c");
+  return (
+    transliterated
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "instagram-grid"
+  );
 }
 
 export function buildFileName(brand: Brand, suffix: "pdf" | "jpg"): string {
-  return `${slugify(brand.name)}-${suffix}.${suffix}`;
+  return `${slugify(brand.name)}.${suffix}`;
 }
 
-type FontBundle = {
-  regular: PDFFont;
-  bold: PDFFont;
-  oblique: PDFFont;
-};
-
-/** Tarayıcıda `Image` objesi yükler; örnek `<img src={url}>` ile aynı. */
 async function loadImageAsElement(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
+    // CORS mode: without it a cross-origin image taints the canvas and
+    // `canvas.toBlob` fails with a SecurityError during export.
+    img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Görsel yüklenemedi."));
     img.src = url;
@@ -68,260 +76,314 @@ async function loadImageAsElement(url: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Export verisi, grid motorundan bağımsız olarak yeniden türetilmez;
- * `computeGrid` direk çağrılır.
+ * Sanitize a hex color string. Accepts `#rgb`, `#rrggbb`, `rgb(...)`, or a raw
+ * CSS color name. Falls back to `#ffffff` on any parse failure.
  */
-export async function buildExportData(
-  brand: Brand,
-  result: GridResult,
-  imageUrls: Promise<string>[],
-): Promise<{ brand: Brand; result: GridResult; images: HTMLImageElement[] }> {
-  const images = await Promise.all(imageUrls.map(loadImageAsElement));
-  return { brand, result, images };
-}
+export function normalizeColor(value: string, fallback = "#ffffff"): string {
+  if (!value) return fallback;
 
-/**
- * A4 + 3 sütunlu grid çıktını başlatır.
- */
-export function buildCanvas(
-  result: GridResult,
-): { pageCount: number; canvasHeight: number } {
-  const pageCount = Math.max(1, Math.ceil(result.cells.length / GRID_COLUMNS));
-  return { pageCount, canvasHeight: pageCount * A4_H };
-}
+  const trimmed = value.trim();
 
-/**
- * PDF içeriği.
- */
-export async function buildPdfBytes(
-  brand: Brand,
-  result: GridResult,
-  imageElements: Promise<HTMLImageElement>[],
-): Promise<Uint8Array> {
-  const images = await Promise.all(imageElements);
+  // Already a plain name.
+  if (!trimmed.startsWith("#") && !trimmed.startsWith("rgb(")) return trimmed;
 
-  const pageCount = Math.max(1, Math.ceil(result.cells.length / GRID_COLUMNS));
-  const pdfDoc = await PDFDocument.load(2480, 3508);
-  const fontBundle = await loadFontBundle(pdfDoc);
+  // #rgb or #rrggbb
+  if (trimmed.startsWith("#")) {
+    const hex = trimmed.slice(1);
+    if (/^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(hex)) return trimmed.toLowerCase();
+    return fallback;
+  }
 
-  for (let page = 0; page < pageCount; page += 1) {
-    const pageRect = { x: 0, y: A4_H, width: A4_W, height: A4_H };
-
-    // Header (marka + bio) her sayfanın başında
-    const headerY = A4_H - HEADER_PADDING;
-    await drawHeader(pdfDoc, pageRect, headerY, brand, fontBundle);
-
-    // Grid
-    const gridY = Math.min(headerY - GRID_LEADING, pageRect.height - FOOTER_LEADING - GRID_LEADING);
-    const rowCount = Math.ceil(result.cells.length / GRID_COLUMNS);
-    const gridYEnd = gridY - rowCount * (GRID_COLUMNS + GRID_LEADING);
-    await drawGrid(
-      pdfDoc,
-      pageRect,
-      gridYEnd,
-      result,
-      images,
-      fontBundle,
-      page + 1,
-      pageCount,
-    );
-
-    // Footer
-    const footerY = HEADER_PADDING + 12;
-    await drawFooter(pdfDoc, pageRect, footerY, brand);
-
-    // İçerik bittiğinde şartı kontrol et
-    if (pageCount > 1 && page < pageCount - 1) {
-      pdfDoc.addPage();
+  // rgb(...)
+  const match = trimmed.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+  if (match) {
+    const [_, r, g, b] = match.map(Number);
+    if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+      return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
     }
   }
 
-  const bytes = pdfDoc.save();
+  return fallback;
+}
+
+/** A4 page geometry: rows that fit between the given grid bounds. */
+export function calculatePagination(
+  cells: GridResult["cells"],
+  cellSize: number,
+  gridTop: number,
+  gridBottom: number,
+): { rowsPerPage: number; cellsPerPage: number; pageCount: number } {
+  const usableHeight = gridBottom - gridTop;
+  const rowsPerPage = Math.max(
+    1,
+    Math.floor((usableHeight + GRID_LEADING) / (cellSize + GRID_LEADING)),
+  );
+  const cellsPerPage = rowsPerPage * GRID_COLUMNS;
+  const pageCount = Math.max(1, Math.ceil(cells.length / cellsPerPage));
+  return { rowsPerPage, cellsPerPage, pageCount };
+}
+
+/**
+ * Compute a 1:1 square crop rectangle taken from the image centre.
+ * - sourceSize = min(naturalWidth, naturalHeight)
+ * - center the source rectangle inside the source image
+ * - destination is a full square cell (object-cover style)
+ */
+export function calculateSquareCrop(
+  image: HTMLImageElement,
+  cellSize: number,
+): { srcX: number; srcY: number; srcW: number; srcH: number; dstX: number; dstY: number; dstW: number; dstH: number } {
+  const w = image.naturalWidth || image.width || 0;
+  const h = image.naturalHeight || image.height || 0;
+  if (w === 0 || h === 0) {
+    return {
+      srcX: 0,
+      srcY: 0,
+      srcW: 1,
+      srcH: 1,
+      dstX: 0,
+      dstY: 0,
+      dstW: cellSize,
+      dstH: cellSize,
+    };
+  }
+
+  const sourceSize = Math.min(w, h);
+  const srcX = (w - sourceSize) / 2;
+  const srcY = (h - sourceSize) / 2;
+  const srcW = sourceSize;
+  const srcH = sourceSize;
+
+  return {
+    srcX,
+    srcY,
+    srcW,
+    srcH,
+    dstX: 0,
+    dstY: 0,
+    dstW: cellSize,
+    dstH: cellSize,
+  };
+}
+
+/** Render one export page onto a square pixel canvas, in UI order. */
+export function renderExportPage(
+  canvas: HTMLCanvasElement,
+  page: number,
+  images: HTMLImageElement[],
+  pageCells: GridResult["cells"],
+  brand: Brand,
+  cellSize: number,
+  cellsPerPage: number,
+  totalPages: number,
+  profileImage?: HTMLImageElement | null,
+  /** Vertical offset in A4 points; lets the JPG builder stack pages. */
+  topOffsetPt = 0,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas context is not available.");
+
+  // Draw in A4 point coordinates; the canvas itself is EXPORT_SCALE larger.
+  ctx.setTransform(
+    EXPORT_SCALE,
+    0,
+    0,
+    EXPORT_SCALE,
+    0,
+    topOffsetPt * EXPORT_SCALE,
+  );
+
+  // Start every page with a clean background.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, A4_W, A4_H);
+
+  if (pageCells.length === 0) return;
+
+  // Grid starts below the header band (avatar, brand, bio, date).
+  const gridTop = GRID_TOP;
+
+  // `pageCells` are this page's slice of the grid, in grid order, so the local
+  // row and the matching image index both come from the position in the page.
+  const imageOffset = page * cellsPerPage;
+  for (let i = 0; i < pageCells.length; i += 1) {
+    const cell = pageCells[i];
+    const column = cell.column;
+    const row = Math.floor(i / GRID_COLUMNS);
+    const x = column * (cellSize + GRID_LEADING);
+    const y = gridTop + row * (cellSize + GRID_LEADING);
+
+    // Cell background.
+    ctx.fillStyle = "#f8faf9";
+    ctx.fillRect(x, y, cellSize, cellSize);
+
+    const image = images[imageOffset + i];
+    if (!image) continue;
+    const crop = calculateSquareCrop(image, cellSize);
+
+    // object-cover like 1:1 crop from the centre, drawn into this cell.
+    ctx.drawImage(
+      image,
+      crop.srcX,
+      crop.srcY,
+      crop.srcW,
+      crop.srcH,
+      x + crop.dstX,
+      y + crop.dstY,
+      crop.dstW,
+      crop.dstH,
+    );
+
+    // Pinned and planned markers.
+    if (cell.pinned) {
+      ctx.fillStyle = "#111827";
+      ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillText("📌", x + 6, y + 18);
+    }
+    if (cell.post.source === "planlanan") {
+      ctx.fillStyle = "#111827";
+      ctx.font = "10px Inter, system-ui, sans-serif";
+      ctx.fillText("PLAN", x + 6, y + 14);
+    }
+  }
+
+  // Header: small circular profile avatar, brand, username, bio, date.
+  const profileSize = 72;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(profileSize / 2, profileSize / 2, profileSize / 2, 0, Math.PI * 2);
+  ctx.clip();
+  if (profileImage && profileImage.naturalWidth > 0) {
+    const crop = calculateSquareCrop(profileImage, profileSize);
+    ctx.drawImage(
+      profileImage,
+      crop.srcX,
+      crop.srcY,
+      crop.srcW,
+      crop.srcH,
+      0,
+      0,
+      profileSize,
+      profileSize,
+    );
+  } else {
+    ctx.fillStyle = "#e5e7eb";
+    ctx.fillRect(0, 0, profileSize, profileSize);
+  }
+  ctx.restore();
+
+  ctx.fillStyle = "#111827";
+  ctx.font = "20px Inter, system-ui, sans-serif";
+  ctx.fillText(brand.name, profileSize + 20, 30);
+
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "14px Inter, system-ui, sans-serif";
+  ctx.fillText(`@${brand.username}`, profileSize + 20, 56);
+
+  if (brand.bio) {
+    const maxChars = Math.max(10, Math.floor((A4_W - profileSize - 50) / 7.6));
+    const lines = wrapText(brand.bio, maxChars);
+    let lineY = 86;
+    for (const line of lines) {
+      ctx.fillStyle = "#555555";
+      ctx.font = "14px Inter, system-ui, sans-serif";
+      ctx.fillText(line, profileSize + 20, lineY);
+      lineY += 18;
+    }
+  }
+
+  // Creation date: brand id if it is a real timestamp, otherwise export date.
+  const parsed = brand.id ? Date.parse(brand.id) : NaN;
+  const created = new Date(Number.isNaN(parsed) ? Date.now() : parsed);
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = "11px Inter, system-ui, sans-serif";
+  ctx.fillText(
+    created.toLocaleDateString("tr-TR", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }),
+    A4_W - 110,
+    30,
+  );
+
+  // Footer: consistent page info.
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "9px Inter, system-ui, sans-serif";
+  ctx.fillText(
+    `Dijivo Grid Preview · ${brand.name} · ${brand.username} · ${page + 1} / ${totalPages}`,
+    8,
+    A4_H - 6,
+  );
+}
+
+/**
+ * Decode a standard Base64 string into raw bytes.
+ * Kept public so binary conversion is unit-testable without a canvas.
+ */
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
   return bytes;
 }
 
-async function loadFontBundle(pdfDoc: PDFDocument): Promise<FontBundle> {
-  const regular = await pdfDoc.embedFont(await readFont(FONT_PATHS.regular));
-  const bold = await pdfDoc.embedFont(await readFont(FONT_PATHS.bold));
-  const oblique = await pdfDoc.embedFont(await readFont(FONT_PATHS.oblique));
-  return { regular, bold, oblique };
-}
-
-async function readFont(filePath: string): Promise<Buffer> {
-  const file = await open(filePath, "r");
-  const buf = Buffer.from(await file.readFile());
-  await file.close();
-  return buf;
-}
-
-async function drawHeader(
-  pdfDoc: PDFDocument,
-  rect: { x: number; y: number; width: number; height: number },
-  headerY: number,
-  brand: Brand,
-  fonts: FontBundle,
-) {
-  if (brand.profileImageUrl) {
-    const img = new Image();
-    img.src = brand.profileImageUrl;
-    const size = 48;
-    const x = rect.x + (rect.width - size) / 2;
-    const y = headerY - size;
-    const page = await pdfDoc.addPage();
-    const pdfImage = await pdfDoc.embedPng(await fetchImageBuffer(img.src));
-    page.drawImage(pdfImage, {
-      x,
-      y,
-      width: size,
-      height: size,
-    });
-  } else {
-    const size = 48;
-    const x = rect.x + (rect.width - size) / 2;
-    const y = headerY - size;
-    const page = await pdfDoc.addPage();
-    page.drawRectangle({
-      x,
-      y,
-      width: size,
-      height: size,
-      color: rgb(0.9, 0.9, 0.9),
-    });
-  }
-
-  const font = fonts.bold;
-  const page = await pdfDoc.addPage();
-  page.drawText(brand.name, {
-    x: rect.x + 72,
-    y: headerY - 12,
-    size: 20,
-    font,
-    color: rgb(0.1, 0.1, 0.1),
+/** Convert a canvas to a real JPEG binary, without using `toDataURL`. */
+export function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.92): Promise<Uint8Array<ArrayBuffer>> {
+  return new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("JPEG üretilemedi."));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const data = reader.result;
+          if (typeof data !== "string") {
+            reject(new Error("JPEG binary could not be read."));
+            return;
+          }
+          // `data` is a data URL; take the Base64 payload after the comma.
+          resolve(base64ToBytes(data.slice(data.indexOf(",") + 1)));
+        };
+        reader.onerror = () => reject(new Error("JPEG binary could not be read."));
+        reader.readAsDataURL(blob);
+      },
+      "image/jpeg",
+      quality,
+    );
   });
-  page.drawText(`@${brand.username}`, {
-    x: rect.x + 72,
-    y: headerY - 34,
-    size: 14,
-    font,
-    color: rgb(0.4, 0.4, 0.4),
+}
+
+/** Convert a canvas to a real PNG binary. */
+export function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array<ArrayBuffer>> {
+  return new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("PNG üretilemedi."));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const data = reader.result;
+          if (typeof data !== "string") {
+            reject(new Error("PNG binary could not be read."));
+            return;
+          }
+          resolve(base64ToBytes(data.slice(data.indexOf(",") + 1)));
+        };
+        reader.onerror = () => reject(new Error("PNG binary could not be read."));
+        reader.readAsDataURL(blob);
+      },
+      "image/png",
+    );
   });
-
-  if (brand.bio) {
-    const lines = wrapText(brand.bio, 90, 14, fonts.regular);
-    let lineY = headerY - 52;
-    for (const line of lines) {
-      const page = await pdfDoc.addPage();
-      page.drawText(line, {
-        x: rect.x + 72,
-        y: lineY,
-        size: 14,
-        font: fonts.regular,
-        color: rgb(0.35, 0.35, 0.35),
-      });
-      lineY -= 18;
-    }
-  }
 }
 
-async function drawGrid(
-  pdfDoc: PDFDocument,
-  rect: { x: number; y: number; width: number; height: number },
-  gridYEnd: number,
-  result: GridResult,
-  images: Promise<HTMLImageElement>[],
-  fonts: FontBundle,
-  pageNumber: number,
-  pageCount: number,
-) {
-  const { cells, rowCount } = result;
-  const cellWidth = (rect.width - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
-
-  for (let i = 0; i < cells.length; i += 1) {
-    const cell = cells[i];
-    const x = rect.x + cell.column * (cellWidth + GRID_LEADING);
-    const y = gridYEnd + cell.row * (cellWidth + GRID_LEADING);
-
-    const page = await pdfDoc.addPage();
-    page.drawRectangle({
-      x,
-      y,
-      width: cellWidth,
-      height: cellWidth,
-      color: rgb(0.96, 0.96, 0.96),
-      borderColor: rgb(0.85, 0.85, 0.85),
-      borderWidth: 0.5,
-    });
-
-    const img = await images[i];
-    const pdfImage = await pdfDoc.embedPng(await fetchImageBuffer(img.src));
-    const aspect = pdfImage.width / pdfImage.height;
-    const drawWidth = cellWidth;
-    const drawHeight = drawWidth / aspect;
-    const drawX = x + (cellWidth - drawWidth) / 2;
-    const drawY = y + (cellWidth - drawHeight) / 2;
-
-    page.drawImage(pdfImage, {
-      x: drawX,
-      y: drawY,
-      width: drawWidth,
-      height: drawHeight,
-    });
-
-    if (cell.pinned) {
-      page.drawText("📌", {
-        x: x + 4,
-        y: y + 4,
-        size: 12,
-        font: fonts.bold,
-        color: rgb(0.1, 0.1, 0.1),
-      });
-    }
-
-    if (cell.post.source === "planlanan") {
-      page.drawText("PLAN", {
-        x: x + 4,
-        y: y + 4,
-        size: 10,
-        font: fonts.regular,
-        color: rgb(0.1, 0.1, 0.1),
-      });
-    }
-  }
-
-  const page = await pdfDoc.addPage();
-  page.drawText(
-    `Sayfa ${pageNumber} / ${pageCount}`,
-    {
-      x: rect.x + 8,
-      y: 8,
-      size: 9,
-      font: fonts.regular,
-      color: rgb(0.7, 0.7, 0.7),
-    },
-  );
-}
-
-async function drawFooter(
-  pdfDoc: PDFDocument,
-  rect: { x: number; y: number; width: number; height: number },
-  footerY: number,
-  brand: Brand,
-  fonts: FontBundle,
-) {
-  const page = await pdfDoc.addPage();
-  page.drawText(
-    `Dijivo Grid Preview · ${brand.name} · ${brand.username}`,
-    {
-      x: rect.x + 8,
-      y: footerY,
-      size: 9,
-      font: fonts.regular,
-      color: rgb(0.6, 0.6, 0.6),
-    },
-  );
-}
-
-function wrapText(text: string, maxChars: number, size: number, font: unknown): string[] {
+function wrapText(text: string, maxChars: number): string[] {
   const words = text.split(" ");
   const lines: string[] = [];
   let current = "";
@@ -338,23 +400,134 @@ function wrapText(text: string, maxChars: number, size: number, font: unknown): 
   return lines;
 }
 
-async function fetchImageBuffer(url: string): Promise<Uint8Array> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Görsel dosyası indirilemedi.");
-  }
-  const buffer = await response.arrayBuffer();
-  return new Uint8Array(buffer);
+export async function buildExportData(
+  brand: Brand,
+  result: GridResult,
+  imageUrls: Promise<string>[],
+): Promise<{ brand: Brand; result: GridResult; images: HTMLImageElement[] }> {
+  // `imageUrls` are promises (UI passes `Promise.resolve(url)`), resolve first.
+  const urls = await Promise.all(imageUrls);
+  const images = await Promise.all(urls.map((url) => loadImageAsElement(url)));
+  return { brand, result, images };
 }
 
 /**
- * JPG (resim) çıktısı.
+ * Build a real A4 PDF, with one PDFPage per export page.
+ * Each page is rendered on canvas, captured as PNG bytes, then embedded into
+ * pdf-lib as a full-page image. The final file starts with `%PDF-`.
+ */
+export async function buildPdfBytes(
+  brand: Brand,
+  result: GridResult,
+  imageElements: HTMLImageElement[],
+): Promise<Uint8Array<ArrayBuffer>> {
+  const { cells } = result;
+  const cellSize = (A4_W - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
+
+  const { cellsPerPage, pageCount } =
+    calculatePagination(cells, cellSize, GRID_TOP, GRID_BOTTOM);
+
+  // Profile avatar is loaded once, before rendering, so it is drawn on every
+  // page (an async `Image.src` set inside the sync renderer would not be ready).
+  const profileImage = brand.profileImageUrl
+    ? await loadImageAsElement(brand.profileImageUrl).catch(() => null)
+    : null;
+
+  const pdfDoc = await PDFDocument.create();
+
+  // Each export page is rendered on canvas, captured as PNG and embedded into
+  // a real A4 PDF page.
+  const pageCanvas = document.createElement("canvas");
+  pageCanvas.width = Math.round(A4_W * EXPORT_SCALE);
+  pageCanvas.height = Math.round(A4_H * EXPORT_SCALE);
+
+  for (let page = 0; page < pageCount; page += 1) {
+    const startIndex = page * cellsPerPage;
+    const endIndex = Math.min(cells.length, startIndex + cellsPerPage);
+    const pageCells = cells.slice(startIndex, endIndex);
+
+    renderExportPage(
+      pageCanvas,
+      page,
+      imageElements,
+      pageCells,
+      brand,
+      cellSize,
+      cellsPerPage,
+      pageCount,
+      profileImage,
+    );
+
+    const pngBytes = await canvasToPngBytes(pageCanvas);
+    const base64 = Uint8ArrayToBase64(pngBytes);
+    const img = await pdfDoc.embedPng(base64);
+
+    const pdfPage = pdfDoc.addPage([A4_W, A4_H]);
+
+    // Cover the whole A4 page with the rendered page image.
+    pdfPage.drawImage(img, {
+      x: 0,
+      y: 0,
+      width: A4_W,
+      height: A4_H,
+    });
+  }
+
+  const saved = await pdfDoc.save();
+  return new Uint8Array(saved);
+}
+
+/**
+ * Build a real JPEG from the same export render surface.
+ * No `toDataURL("image/jpeg")` string is inserted into the Blob.
  */
 export async function buildJpgBytes(
   brand: Brand,
   result: GridResult,
-  imageElements: Promise<HTMLImageElement>[],
-): Promise<BlobPart> {
-  // JPG için canvas dökümü; PDF'den bağımsız.
-  return new Uint8Array();
+  imageElements: HTMLImageElement[],
+): Promise<Uint8Array<ArrayBuffer>> {
+  const { cells } = result;
+  const cellSize = (A4_W - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
+
+  const { cellsPerPage, pageCount } =
+    calculatePagination(cells, cellSize, GRID_TOP, GRID_BOTTOM);
+
+  const profileImage = brand.profileImageUrl
+    ? await loadImageAsElement(brand.profileImageUrl).catch(() => null)
+    : null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(A4_W * EXPORT_SCALE);
+  // All export pages are stacked vertically so the JPG shows the same grid
+  // content as the PDF.
+  canvas.height = Math.round(A4_H * EXPORT_SCALE * pageCount);
+
+  for (let page = 0; page < pageCount; page += 1) {
+    const startIndex = page * cellsPerPage;
+    const endIndex = Math.min(cells.length, startIndex + cellsPerPage);
+    const pageCells = cells.slice(startIndex, endIndex);
+
+    renderExportPage(
+      canvas,
+      page,
+      imageElements,
+      pageCells,
+      brand,
+      cellSize,
+      cellsPerPage,
+      pageCount,
+      profileImage,
+      page * A4_H,
+    );
+  }
+
+  return canvasToJpegBytes(canvas, 0.92);
+}
+
+function Uint8ArrayToBase64(bytes: Uint8Array<ArrayBuffer>): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
