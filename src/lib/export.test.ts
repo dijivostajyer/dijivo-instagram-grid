@@ -8,6 +8,7 @@ import {
   calculatePagination,
   calculateSquareCrop,
   buildFileName,
+  getExportAvailability,
   GRID_BOTTOM,
   GRID_LEADING,
   GRID_TOP,
@@ -138,6 +139,20 @@ describe("calculatePagination on real A4 geometry", () => {
     const gridHeight = rowsPerPage * cellSize + (rowsPerPage - 1) * GRID_LEADING;
     expect(GRID_TOP + gridHeight).toBeLessThanOrEqual(GRID_BOTTOM);
     expect(GRID_BOTTOM).toBeLessThan(A4_H);
+  });
+});
+
+describe("getExportAvailability (boş grid export)", () => {
+  it("0 içerikte export kapalı ve açıklama döner", () => {
+    const result = getExportAvailability(0);
+    expect(result.enabled).toBe(false);
+    expect(result.message).toContain("Grid boş");
+    expect(result.message.length).toBeGreaterThan(0);
+  });
+
+  it("1+ içerikte export açık ve mesaj boş", () => {
+    expect(getExportAvailability(1)).toEqual({ enabled: true, message: "" });
+    expect(getExportAvailability(9).enabled).toBe(true);
   });
 });
 

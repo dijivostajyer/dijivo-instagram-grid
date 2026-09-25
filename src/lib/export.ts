@@ -63,6 +63,24 @@ export function buildFileName(brand: Brand, suffix: "pdf" | "jpg"): string {
   return `${slugify(brand.name)}.${suffix}`;
 }
 
+/**
+ * Export kullanılabilirliği. Boş gridde boş PDF/JPG üretilmez:
+ * butonlar devre dışı bırakılır ve kullanıcıya açıklama gösterilir.
+ */
+export function getExportAvailability(cellCount: number): {
+  enabled: boolean;
+  message: string;
+} {
+  if (cellCount > 0) {
+    return { enabled: true, message: "" };
+  }
+  return {
+    enabled: false,
+    message:
+      "Grid boş: dışa aktarmak için en az bir mevcut veya planlanan gönderi ekleyin.",
+  };
+}
+
 async function loadImageAsElement(url: string): Promise<HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
