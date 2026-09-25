@@ -212,7 +212,7 @@ export default function GridManager() {
           <ExportPanel
             brand={brand}
             result={grid}
-            imageUrls={[]}
+            imageUrls={imageUrls}
             options={{
               download: async (fileName, blob) => {
                 const url = URL.createObjectURL(blob);
@@ -225,7 +225,9 @@ export default function GridManager() {
                 URL.revokeObjectURL(url);
               },
               showError: (message) => {
-                alert(message);
+                // Inline error is rendered by ExportPanel; a blocking alert()
+                // would freeze the UI thread during export failures.
+                console.error("[export]", message);
               },
             }}
           />

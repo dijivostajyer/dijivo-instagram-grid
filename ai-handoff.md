@@ -312,11 +312,11 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 
 
 
-\- \*\*Son güncelleme:\*\* 2026-09-25 (MVP aşama 2)
+\- \*\*Son güncelleme:\*\* 2026-09-25 (MVP aşama 3: PDF/JPG dışa aktarma)
 
-\- \*\*Güncelleyen:\*\* Buffy (AI) — MVP aşama 2: içerik yönetimi ve gerçek görsel önizleme (geliştirme sırası adım 4–5)
+\- \*\*Güncelleyen:\*\* Buffy (AI) — MVP aşama 3: PDF/JPG dışa aktarma (geliştirme sırası adım 6)
 
-\- \*\*Aktif iş:\*\* MVP aşama 2 tamamlandı: marka düzenleme, görsel yükleme ile mevcut/planlanan içerik yönetimi, planlanan sıralama (sürükle-bırak + klavye), pinned yönetimi (en fazla 3, Türkçe limit hatası, soldan-sağa taşıma) ve anında güncellenen grid çalışıyor. PDF/JPG dışa aktarma ve paylaşım linki henüz başlanmadı.
+\- \*\*Aktif iş:\*\* MVP aşama 3 tamamlandı: PDF/JPG dışa aktarma çalışıyor. Paylaşılan `renderExportPage()` yüzeyi hem PDF hem JPG'yi aynı header/grid/footer ile üretir; gerçek A4 PDF (pdf-lib, `%PDF-1.7`) ve gerçek JPG (canvas.toBlob, `FF D8 FF`, 1191×1684) üretilir. Export grid sırası, pinned/planlanan/mevcut sırası ve 1:1 merkez kırpma UI ile birebir aynı. Sonraki iş: veri kalıcılığı.
 
 \- \*\*Tamamlananlar:\*\*
   \- Next.js 15 (App Router) + TypeScript + Tailwind CSS v4 iskeleti kuruldu; Vitest test altyapısı eklendi.
@@ -329,12 +329,19 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
   \- Gönderi işlemleri: mevcut ekleme ("en yeni"/"en eski" recency kontrolü), silme (recency yeniden yazımı), pin/unpin (3 limit + Türkçe hata), pinned soldan-sağa taşıma ve yeniden sıralama; planlanan ekleme (planOrder 0), silme ve sürükle-bırak sırası (`src/lib/post-ops.ts`).
   \- Bileşenler: `BrandEditor` (ad, kullanıcı adı, bio, profil görseli), `ExistingPostList` (yükleme, pin/unpin, ←/→ taşıma, silme), `PlannedPostSorter` (dnd-kit sürükle-bırak; klavye sensörü destekli), `GridManager` (tüm sayfa durumu; listeler planOrder/recencyIndex'e göre türetilir), `GridPreview` (hücre başına yüklendi/hata durumu; önbellekten gelen görseller için mount sonrası `complete` kontrolü).
   \- Görseller tarayıcıda Object URL ile önizlenir; orijinal dosya değişmez. Veri yalnızca sayfa oturumunda tutulur (yenilemede kaybolur; bu aşamada bilinçli).
+  \- **Aşama 3 — PDF/JPG dışa aktarma:** Paylaşılan `renderExportPage()` hem PDF hem JPG'yi aynı yüzeyden üretir:72pt dairesel profil avatarı, marka adı, `@kullanıcı adı`, bio, tarih, sayfa numarası footer'ı.
+  \- Gerçek A4 PDF: sayfa canvas'ta render edilir, PNG gömülür; `pdf-lib` `PDFDocument.create()` + `addPage([A4_W, A4_H])` ile üretilir; çıktı `%PDF-1.7` ile başlar `%%EOF` ile biter (indirilen dosyada doğrulandı).
+  \- Gerçek JPG: `canvas.toBlob("image/jpeg")` → Base64 → `base64ToBytes`; `FF D8 FF` magic, canvas açıkça `A4*2` (1191×1684); çok sayfalı export'ta sayfalar tuvale dikey istiflenir.
+  \- A4 pagination: `calculatePagination` ile `rowsPerPage` (A4'te3 satır = 9 hücre/sayfa), `cellsPerPage = rowsPerPage * 3`, `pageCount = ceil(cells/cellsPerPage)`; her sayfada yalnızca o sayfanın hücreleri çizilir.
+  \- Gerçek 1:1 `object-cover` crop: `calculateSquareCrop` sourceSize = min(w,h), source rect merkezden; `drawImage`9 argümanla hücre hedefine çizilir.
+  \- Export görselleri `grid.cells` sırasıyla `GridManager`'den gelir (`imageUrls={imageUrls}`), `crossOrigin="anonymous"` ile yüklenir (aksi halde canvas taint → toBlob SecurityError).
+  \- Hatalar `ExportPanel` içinde satır içi gösterilir; UI thread'ini bloklayan `alert()` kaldırıldı.
 
-\- \*\*Değiştirilen dosyalar:\*\* Aşama 2: `package.json`, `package-lock.json` (@dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities eklendi), `src/lib/validators.ts`, `src/lib/validators.test.ts`, `src/lib/post-ops.ts`, `src/lib/post-ops.test.ts`, `src/components/BrandEditor.tsx`, `src/components/ExistingPostList.tsx`, `src/components/PlannedPostSorter.tsx`, `src/components/GridManager.tsx`, `src/components/GridPreview.tsx`, `src/app/page.tsx`, `AI-HANDOFF.md`. Önceki aşamadan: `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `.gitignore`, `src/lib/types.ts`, `src/lib/grid.ts`, `src/lib/grid.test.ts`, `src/app/layout.tsx`, `src/app/globals.css`, `src/data/sample-data.ts`
+\- \*\*Değiştirilen dosyalar:\*\* Aşama 2: `package.json`, `package-lock.json` (@dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities eklendi), `src/lib/validators.ts`, `src/lib/validators.test.ts`, `src/lib/post-ops.ts`, `src/lib/post-ops.test.ts`, `src/components/BrandEditor.tsx`, `src/components/ExistingPostList.tsx`, `src/components/PlannedPostSorter.tsx`, `src/components/GridManager.tsx`, `src/components/GridPreview.tsx`, `src/app/page.tsx`, `AI-HANDOFF.md`. Önceki aşamadan: `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `.gitignore`, `src/lib/types.ts`, `src/lib/grid.ts`, `src/lib/grid.test.ts`, `src/app/layout.tsx`, `src/app/globals.css`, `src/data/sample-data.ts`. Aşama 3: `src/lib/export.ts`, `src/lib/export.test.ts`, `src/lib/order.test.ts`, `src/components/ExportPanel.tsx`, `src/components/GridManager.tsx`, `ai-handoff.md`, `.gitignore` (`dev.log` git index'inden çıkarıldı `git rm --cached`)
 
-\- \*\*Testler ve sonuçları:\*\* `npm test` (Vitest): 33/33 geçti (grid motoru 15, gönderi işlemleri 13, görsel doğrulama 5). `npm run typecheck`: hatasız. `npm run build`: başarılı. Tarayıcı duman testi (dev sunucusu): pin limiti 3'te kilitlendi ve Türkçe hata gösterildi; 4. pin reddedildi; klavye ile planlanan sıralama listeyi ve gridi eşzamanlı güncelledi; GIF yükleme "Desteklenmeyen dosya türü" hatası verdi, PNG yükleme gridin en üstüne planlanan olarak eklendi ve silme gridi doğru güncelledi; hücreler mobilde (375px) ve masaüstünde kare (1:1) kaldı.
+\- \*\*Testler ve sonuçları:\*\*`npm test` (Vitest): 50/50 geçti (grid15, gönderi13, doğrulama5, export15, sıralama2). `npm run typecheck`:0 hata. `npm run build`: başarılı. Export duman testi (tarayıcı): PDF İndir → `dijivo-demo-marka.pdf` (%PDF-1.7, %%EOF, tarayıcı PDF görüntüleyicisinde1/1 A4 sayfa açıldı); JPG İndir → `dijivo-demo-marka.jpg` (FF D8 FF,1191×1684, resim görüntüleyicisinde açıldı); export içeriği UI grid sırasıyla birebir aynı (2 pinned → 3 planlanan → 3 mevcut), header'da küçük dairesel avatar + marka/kullanıcı adı/bio/tarih; mobil (375px) ve masaüstü arayüz bozulmadı. Çok sayfalı (>9 hücre) export el ile test edilmedi; sayfalama birim testleriyle sabit. Önceki aşama duman testi: pin limiti3 kilitlendi, klavye sıralama, GIF reddi, PNG ekleme/silme başarılı; hücreler mobilde (375px) ve masaüstünde kare (1:1) kaldı.
 
-\- \*\*Bilinen engel/risk:\*\* Nihai Dijivo marka varlıkları ve paylaşım linki saklama politikası netleşmeli. Veri kalıcılığı yok: sayfa yenilenince yüklenen görseller (Object URL) ve değişiklikler kaybolur; kalıcı depolama sonraki aşamada değerlendirilmeli (handoff gereği veritabanı MVP'de zorunlu değil). dnd-kit SSR'da aria-describedby hydration uyarısı üretebilir; sürükleme tutamacında `suppressHydrationWarning` ile bastırıldı. Demo görselleri placehold.co'dan geldiği için çevrimdışı gösterimde yüklenmez. 3+ pinned gönderinin "normal akışa düşme" davranışı ürün sahibiyle teyit edilecek.
+\- \*\*Bilinen engel/risk:\*\* Nihai Dijivo marka varlıkları ve paylaşım linki saklama politikası netleşmeli. Veri kalıcılığı yok: sayfa yenilenince yüklenen görseller (Object URL) ve değişiklikler kaybolur; kalıcı depolama sonraki aşamada değerlendirilmeli (handoff gereği veritabanı MVP'de zorunlu değil). dnd-kit SSR'da aria-describedby hydration uyarısı üretebilir; sürükleme tutamacında `suppressHydrationWarning` ile bastırıldı. Demo görselleri placehold.co'dan geldiği için çevrimdışı gösterimde yüklenmez. 3+ pinned gönderinin "normal akışa düşme" davranışı ürün sahibiyle teyit edilecek. Export riski: çok sayfalı JPG'te tuval yüksekliği `A4*2*pageCount` piksel olur; ~10+ sayfada tarayıcı tuval boyut sınırı aşılabilir (kısmi test edilmedi). Cross-origin görsel CORS desteklemiyorsa export görsel yükleme hatası verir (bilinçli, satır içi hata mesajı gösterilir).
 
 
 
@@ -342,7 +349,7 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 
 
 
-1\. A4 PDF ve JPG dışa aktarmaya başla (geliştirme sırası adım 6): kütüphane seçimini gerekçesiyle `## 13. Karar Kaydı`'na ekle; gridde görünen durumu A4 sayfada marka adı, kullanıcı adı ve tarihle üret. Dışa aktarım Object URL tabanlı görsellerle çalışmadan önce görsellerin kalıcı temsili gerekecek.
+1\. Veri kalıcılığına başla (sonraki somut adım): durumu `localStorage`/IndexedDB'ye taşı ki yenilemede kaybolmasın; ardından paylaşım linki MVP'sini değerlendir. Export tarafında kalan iş: çok sayfalı (>9 hücre) export'u el ile duman testi ve büyük sayfa sayısı için tuval boyutu sınırı.
 
 2\. Grid sıralama veya pinned davranışında değişiklik yapmadan önce `src/lib/grid.test.ts` ve `src/lib/post-ops.test.ts` içindeki birim testleri güncelle; yeni davranışı önce testle sabitle.
 
@@ -387,6 +394,10 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 | 2026-09-25 | RADAAR yerine özel grid preview aracı | RADAAR takvim ve tekil önizleme sunuyor; gerekli toplu profil grid sunumu, pin mantığı, Dijivo A4/JPG çıktısı ve paylaşım ihtiyacını karşılamıyor. | MVP özel araç olarak geliştirilecek. |
 
 | 2026-09-25 | MVP, manuel içerik ekleme ile başlayacak | En kısa sürede değer üretmek ve Meta entegrasyonunu kapsam dışı tutmak. | Instagram API bağlantısı Faz 2. |
+
+| 2026-09-25 | PDF/JPG export mimarisi: Browser Canvas → aynı `renderExportPage` yüzeyi → JPG binary ve pdf-lib ile A4 PDF | Tek render kodu iki formatı da besler; PDF ve JPG aynı marka, grid sırası, pinned/planlanan durumu ve kırmayı garanti eder. `pdf-lib` tarayıcıda çalışır ve gerçek `%PDF-` üretir; JPG `canvas.toBlob` ile gerçek binary olur. Node-only API (fs/Buffer) kullanılmaz. | Export mimarisi sabitlendi; `pdf-lib` dependency projede kullanımda kaldı. |
+
+| 2026-09-25 | Export görselleri `crossOrigin="anonymous"` ile yüklenir | Tarayıcıda CORS'suz cross-origin görsel canvas'i kirletir → `toBlob` SecurityError verir; placehold.co `ACAO:*` destekler. | Export görsel hataları artık satır içi mesajla görünür; bloklayan `alert()` kaldırıldı. |
 
 
 
