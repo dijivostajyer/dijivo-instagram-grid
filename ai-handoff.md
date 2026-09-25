@@ -312,11 +312,11 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 
 
 
-\- \*\*Son güncelleme:\*\* 2026-09-25 (salt-okunur paylaşım linki MVP)
+\- \*\*Son güncelleme:\*\* 2026-09-25 (production Supabase share storage)
 
-\- \*\*Güncelleyen:\*\* Codex (AI) — salt-okunur paylaşım linki MVP
+\- \*\*Güncelleyen:\*\* Codex (AI) — production Supabase share storage
 
-\- \*\*Aktif iş:\*\* Salt-okunur paylaşım linki MVP tamamlandı. Editör `/api/shares` ile immutable snapshot oluşturur; `/share/<token>` yalnızca marka ve grid önizlemesini gösterir. Sonraki iş: gerçek production share storage/deployment adapter'ı ve token geçersizleştirme politikası.
+\- \*\*Aktif iş:\*\* Production share storage tamamlandı: Supabase Postgres + private Storage adapter'ı, TTL, revoke ve signed URL çözümü hazır. Sonraki iş: gerçek Supabase project credential'larıyla deployment smoke testi ve operasyonel revoke arayüzü.
 
 \- \*\*Tamamlananlar:\*\*
   \- Next.js 15 (App Router) + TypeScript + Tailwind CSS v4 iskeleti kuruldu; Vitest test altyapısı eklendi.
@@ -343,6 +343,7 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
   \- `GridManager` kalıcılığı dışarıdan alır (state + `persistUpload` + `resetToDefaults`); "Verileri sıfırla (demo verilere dön)" bölümü eklendi.
   \- Boş grid export koruması: `getExportAvailability` — butonlar `disabled` ve "Grid boş: …" açıklaması görünür.
   \- **Aşama 5 — salt-okunur paylaşım:** `ShareSnapshot` strict doğrulaması, UUID token helper'ı ve `ShareStore` sözleşmesi eklendi. `InMemoryShareStore` geçici adapter'ı snapshot JSON'unu tek Node sürecinde tutar; `/api/shares` snapshot oluşturur, `/share/[token]` ortak `GridPreview` ile salt-okunur gösterir. Snapshot editör değişikliklerinden bağımsızdır; `blob:` görseller taşınabilir `data:` URL'e çevrilir, `idb:`/`blob:` referansları reddedilir.
+  \- **Aşama 6 — production share storage:** `SupabaseShareStore`, `ShareStore` abstraction'ını koruyarak private `share-images` bucket'ına data URL upload'larını taşır; payload yalnızca `storage:<path>` veya external HTTP(S) referansı saklar. Sayfa açılışında private yollar server-side 3600 saniyelik signed URL'e çözülür. `SHARE_TTL_DAYS` (varsayılan 30) expiry, `revoke(token)` revoked_at desteği, upload/DB hata rollback'i ve 60 hücre / 10 MB tek görsel / 20 MB toplam sınırları eklendi. Production eksik env'de memory fallback yapılmaz.
 
 \- \*\*Değiştirilen dosyalar:\*\* Aşama 2: `package.json`, `package-lock.json` (@dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities eklendi), `src/lib/validators.ts`, `src/lib/validators.test.ts`, `src/lib/post-ops.ts`, `src/lib/post-ops.test.ts`, `src/components/BrandEditor.tsx`, `src/components/ExistingPostList.tsx`, `src/components/PlannedPostSorter.tsx`, `src/components/GridManager.tsx`, `src/components/GridPreview.tsx`, `src/app/page.tsx`, `AI-HANDOFF.md`. Önceki aşamadan: `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `.gitignore`, `src/lib/types.ts`, `src/lib/grid.ts`, `src/lib/grid.test.ts`, `src/app/layout.tsx`, `src/app/globals.css`, `src/data/sample-data.ts`. Aşama 3: `src/lib/export.ts`, `src/lib/export.test.ts`, `src/lib/order.test.ts`, `src/components/ExportPanel.tsx`, `src/components/GridManager.tsx`, `ai-handoff.md`, `.gitignore` (`dev.log` git index'inden çıkarıldı `git rm --cached`). Aşama 4: `src/lib/storage.ts`, `src/lib/storage.test.ts`, `src/lib/image-store.ts`, `src/hooks/use-persisted-grid.ts`, `src/lib/export.ts` (`getExportAvailability`), `src/lib/export.test.ts`, `src/components/GridManager.tsx`, `src/components/ExportPanel.tsx`, `ai-handoff.md`. Lifecycle cleanup: `src/lib/image-lifecycle.ts`, `src/lib/image-lifecycle.test.ts`, `src/lib/image-store.ts`, `src/hooks/use-persisted-grid.ts`, `src/components/BrandEditor.tsx`, `ai-handoff.md`.
 
@@ -417,6 +418,8 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 | 2026-09-25 | Boş gridde export üretilmez | Boş gridden blank PDF/JPG kullanıcıya değersizdir. | `getExportAvailability` ile butonlar `disabled` olur ve "Grid boş" açıklaması gösterilir. |
 
 | 2026-09-25 | Salt-okunur paylaşım snapshot/token/storage kararı: UUID token'lı immutable `ShareSnapshot`, `ShareStore` adapter sözleşmesi ve geçici process-geneli `InMemoryShareStore` | Editör localStorage/IndexedDB verisi başka tarayıcıda paylaşılmaz; snapshot ayrı oluşturulup strict doğrulanmalıdır. Production database/backend olmadığı için kalıcı cross-device garanti verilemez. `blob:` görseller `data:` URL'e dönüştürülür; `idb:`/`blob:` referansları reddedilir. | `/api/shares` snapshot oluşturur, `/share/[token]` yalnızca okunur render eder. Gerçek dağıtım için shared DB + object storage/CDN adapter'ı, TTL/revocation ve çoklu-instance uyumu gerekir. |
+
+| 2026-09-25 | Production share storage: `SupabaseShareStore` (Postgres + private Storage) | Memory store restart/deploy/multi-instance gereksinimlerini karşılamaz. Data upload'ları DB'ye yazılmadan private bucket'a taşınır; external HTTP(S) URL'ler SSRF riski nedeniyle server fetch edilmeden external ref kalır. | Payload `storage:<path>` saklar; renderda server-side 3600 sn signed URL üretilir. TTL 30 gün varsayılan, revoke `revoked_at` ile uygulanır; production için `SUPABASE_URL` ve `SUPABASE_SECRET_KEY` zorunludur. |
 
 
 

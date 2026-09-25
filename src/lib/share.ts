@@ -2,6 +2,9 @@ import type { Brand, GridResult, PostSource } from "./types";
 import { isValidShareToken } from "./share-token";
 
 export const SHARE_SNAPSHOT_VERSION = 1;
+export const MAX_SHARE_CELLS = 60;
+export const MAX_SHARE_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_SHARE_TOTAL_BYTES = 20 * 1024 * 1024;
 
 export interface ShareBrand {
   name: string;
@@ -45,6 +48,7 @@ function isOptionalString(value: unknown): value is string | undefined {
 /** Yalnızca başka tarayıcıda da çözülebilen görsel URL'leri kabul edilir. */
 export function isShareableImageUrl(value: string): boolean {
   if (value.startsWith("blob:") || value.startsWith("idb:")) return false;
+  if (/^storage:shares\/[0-9a-f-]+\/[a-z0-9-]+\.(?:jpg|png|webp)$/i.test(value)) return true;
   if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value)) {
     return true;
   }
@@ -91,7 +95,7 @@ export function validateShareSnapshotInput(value: unknown): ShareSnapshotInput |
     if (!isShareGridCell(cell)) return null;
     cells.push({ ...cell });
   }
-  if (cells.length === 0) return null;
+  if (cells.length === 0 || cells.length > MAX_SHARE_CELLS) return null;
   return { brand: { ...value.brand }, cells };
 }
 

@@ -1,6 +1,6 @@
 import GridPreview from "@/components/GridPreview";
 import { isValidShareToken } from "@/lib/share-token";
-import { shareStore } from "@/lib/share-store";
+import { getShareStore } from "@/lib/share-store";
 import type { GridResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export default async function SharePage({
   const { token } = await params;
   if (!isValidShareToken(token)) return <UnavailableShare />;
   try {
-    const snapshot = await shareStore.get(token);
+    const snapshot = await getShareStore().get(token);
     if (!snapshot) return <UnavailableShare />;
     return (
       <main className="mx-auto max-w-2xl px-4 py-8">

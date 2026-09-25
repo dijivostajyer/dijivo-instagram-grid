@@ -6,11 +6,14 @@ import {
   type ShareSnapshotInput,
 } from "./share";
 import { generateShareToken, isValidShareToken } from "./share-token";
+import { SupabaseShareStore, createSupabaseShareDriver } from "./supabase-share-store";
+import { getShareStorageConfig } from "./share-config";
 
 /** Production veritabanı adapter'ının karşılayacağı paylaşım depolama sözleşmesi. */
 export interface ShareStore {
   create(input: ShareSnapshotInput): Promise<ShareSnapshot>;
   get(token: string): Promise<ShareSnapshot | null>;
+  revoke(token: string): Promise<void>;
 }
 
 export class InMemoryShareStore implements ShareStore {
@@ -32,6 +35,11 @@ export class InMemoryShareStore implements ShareStore {
     if (!isValidShareToken(token)) return null;
     return deserializeShareSnapshot(this.records.get(token));
   }
+
+  async revoke(token: string): Promise<void> {
+    if (!isValidShareToken(token)) return;
+    this.records.delete(token);
+  }
 }
 
 declare global {
@@ -45,5 +53,10 @@ declare global {
  * Geçici MVP adapter'ı: tek Node sürecinin belleğinde yaşar. Gerçek production
  * dağıtımı için bunun yerine paylaşılan, kalıcı bir database/object storage adapter'ı gerekir.
  */
-export const shareStore: ShareStore =
-  globalThis.dijivoShareStore ?? (globalThis.dijivoShareStore = new InMemoryShareStore());
+export function getShareStore(env: NodeJS.ProcessEnv = process.env): ShareStore {
+  if (env.NODE_ENV === "production") {
+    const config = getShareStorageConfig(env);
+    return new SupabaseShareStore(createSupabaseShareDriver(config), config.ttlDays);
+  }
+  return globalThis.dijivoShareStore ?? (globalThis.dijivoShareStore = new InMemoryShareStore());
+}
