@@ -12,7 +12,6 @@ import {
   buildExportData,
   buildFileName,
   buildPdfBytes,
-  buildJpgBytes,
   slugify,
 } from "@/lib/export";
 

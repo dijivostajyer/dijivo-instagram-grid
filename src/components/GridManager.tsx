@@ -122,6 +122,11 @@ export default function GridManager() {
   }
 
   const canPinMore = grid.pinnedCount < MAX_PINNED;
+  // Export, UI'da görülen sırayı aynen almalı: grid cellsdeki imageUrl'ler.
+  const imageUrls = useMemo(
+    () => grid.cells.map((cell) => Promise.resolve(cell.post.imageUrl)),
+    [grid],
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">

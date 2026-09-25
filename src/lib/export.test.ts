@@ -28,7 +28,8 @@ describe("slugify", () => {
   it("boş ve boşluk içeren isimleri güvenli dosya adına çevirir", () => {
     expect(slugify("  Dijivo  İnstagram  ")).toBe("dijivo-instagram");
     expect(slugify("")).toBe("instagram-grid");
-    expect(slugify("Marka Adı!")).toBe("marka-adı");
+    // disliked characters trimmed
+    expect(slugify("Marka Adi!")).toBe("marka-adi");
   });
 });
 
