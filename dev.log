@@ -178,3 +178,30 @@ node:fs/promises
 ./src/lib/export.ts
 ./src/components/ExportPanel.tsx
 ./src/components/GridManager.tsx
+ ⨯ node:fs/promises
+Module build failed: UnhandledSchemeError: Reading from "node:fs/promises" is not handled by plugins (Unhandled scheme).
+Webpack supports "data:" and "file:" URIs by default.
+You may need an additional plugin to handle "node:" URIs.
+Import trace for requested module:
+node:fs/promises
+./src/lib/export.ts
+./src/components/ExportPanel.tsx
+./src/components/GridManager.tsx
+ ⨯ node:fs/promises
+Module build failed: UnhandledSchemeError: Reading from "node:fs/promises" is not handled by plugins (Unhandled scheme).
+Webpack supports "data:" and "file:" URIs by default.
+You may need an additional plugin to handle "node:" URIs.
+Import trace for requested module:
+node:fs/promises
+./src/lib/export.ts
+./src/components/ExportPanel.tsx
+./src/components/GridManager.tsx
+ ⨯ node:fs/promises
+Module build failed: UnhandledSchemeError: Reading from "node:fs/promises" is not handled by plugins (Unhandled scheme).
+Webpack supports "data:" and "file:" URIs by default.
+You may need an additional plugin to handle "node:" URIs.
+Import trace for requested module:
+node:fs/promises
+./src/lib/export.ts
+./src/components/ExportPanel.tsx
+./src/components/GridManager.tsx

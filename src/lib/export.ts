@@ -75,8 +75,8 @@ export async function buildExportData(
   brand: Brand,
   result: GridResult,
   imageUrls: Promise<string>[],
-): Promise<{ brand: Brand; result: GridResult; images: HTMLImageElement[] }> {
-  const images = await Promise.all(imageUrls.map(loadImageAsElement));
+): Promise<{ brand: Brand; result: GridResult; images: Promise<HTMLImageElement>[] }> {
+  const images = await Promise.all(imageUrls.map(async (url) => loadImageAsElement(url)));
   return { brand, result, images };
 }
 
@@ -128,7 +128,7 @@ export async function buildPdfBytes(
 
     // Footer
     const footerY = HEADER_PADDING + 12;
-    await drawFooter(pdfDoc, pageRect, footerY, brand);
+    await drawFooter(pdfDoc, pageRect, footerY, brand, fontBundle);
 
     // İçerik bittiğinde şartı kontrol et
     if (pageCount > 1 && page < pageCount - 1) {
