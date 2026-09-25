@@ -75,6 +75,9 @@ describe("SupabaseShareStore", () => {
   it("production eksik env'de memory fallback yapmaz", () => {
     expect(() => getShareStorageConfig({ NODE_ENV: "production" })).toThrow("Supabase paylaşım storage yapılandırması eksik.");
   });
+  it("API alt yolu içeren Supabase URL'ini reddeder", () => {
+    expect(() => getShareStorageConfig({ NODE_ENV: "test", SUPABASE_URL: "https://x.supabase.co/rest/v1", SUPABASE_SECRET_KEY: "test" })).toThrow("proje kök URL");
+  });
 });
 
 describe("getShareStore seçimi", () => {
