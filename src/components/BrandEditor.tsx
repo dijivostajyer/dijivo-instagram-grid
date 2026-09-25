@@ -7,8 +7,7 @@ import type { Brand } from "@/lib/types";
 
 /**
  * Marka bilgileri düzenleyicisi: ad, kullanıcı adı, açıklama ve profil görseli.
- * Değişiklikler anında üst bileşenin state'ine yansır (sayfa yenilenince kaybolur;
- * bu MVP aşamasında kalıcı depolama yoktur).
+ * Değişiklikler anında üst bileşenin kalıcı state'ine yansır.
  */
 export default function BrandEditor({
   brand,
@@ -63,6 +62,15 @@ export default function BrandEditor({
             </span>
           )}
         </button>
+        {brand.profileImageUrl ? (
+          <button
+            type="button"
+            onClick={() => onChange({ ...brand, profileImageUrl: undefined })}
+            className="mt-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+          >
+            Profil görselini kaldır
+          </button>
+        ) : null}
         <input
           ref={fileInputRef}
           type="file"

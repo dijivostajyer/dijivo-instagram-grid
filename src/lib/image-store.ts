@@ -130,8 +130,9 @@ export async function deleteStoredImage(ref: string): Promise<void> {
   if (id === null) return;
   try {
     await withStore("readwrite", (store) => store.delete(id));
-  } catch {
-    // silinemese bile sıfırlama akışı devam eder
+  } catch (error) {
+    // Silinemese bile kullanıcı akışı devam eder.
+    console.warn("[persistence] Kalıcı görsel silinemedi:", error);
   }
 }
 
@@ -139,7 +140,8 @@ export async function deleteStoredImage(ref: string): Promise<void> {
 export async function clearStoredImages(): Promise<void> {
   try {
     await withStore("readwrite", (store) => store.clear());
-  } catch {
-    // depo yoksa temizlenecek bir şey de yok
+  } catch (error) {
+    // Depo yoksa/silinemiyorsa reset akışı yine devam eder.
+    console.warn("[persistence] Kalıcı görseller temizlenemedi:", error);
   }
 }

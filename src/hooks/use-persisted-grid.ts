@@ -9,10 +9,15 @@ import {
 } from "@/data/sample-data";
 import {
   clearStoredImages,
+  deleteStoredImage,
   isImageRef,
   loadImageAsObjectUrl,
   persistObjectUrl,
 } from "@/lib/image-store";
+import {
+  cleanUpRemovedImages,
+  revokeTrackedObjectUrls,
+} from "@/lib/image-lifecycle";
 import {
   clearPersistedState,
   loadAppState,
@@ -51,12 +56,14 @@ function getBrowserStorage(): StorageLike | null {
 async function hydrateState(
   state: PersistedAppState,
   refByObjectUrl: Map<string, string>,
+  trackedObjectUrls: Set<string>,
 ): Promise<PersistedAppState> {
   const resolve = async (value: string | undefined): Promise<string | undefined> => {
     if (value === undefined || !isImageRef(value)) return value;
     const objectUrl = await loadImageAsObjectUrl(value);
     if (objectUrl === null) return undefined;
     refByObjectUrl.set(objectUrl, value);
+    trackedObjectUrls.add(objectUrl);
     return objectUrl;
   };
 
@@ -113,6 +120,7 @@ export function usePersistedGrid(): PersistedGrid {
   const [uploadTick, setUploadTick] = useState(0);
 
   const refByObjectUrl = useRef<Map<string, string>>(new Map());
+  const trackedObjectUrls = useRef<Set<string>>(new Set());
   const stateRef = useRef<PersistedAppState>(state);
   const skipPersistRef = useRef(false);
 
@@ -123,13 +131,29 @@ export function usePersistedGrid(): PersistedGrid {
     let cancelled = false;
     void (async () => {
       const stored = loadAppState(getBrowserStorage(), getDefaultAppState());
-      const hydrated = await hydrateState(stored, refByObjectUrl.current);
+      const hydrated = await hydrateState(
+        stored,
+        refByObjectUrl.current,
+        trackedObjectUrls.current,
+      );
       if (cancelled) return;
+      stateRef.current = hydrated;
       setState(hydrated);
       setReady(true);
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Kalıcı Blob'lar saklanmaya devam eder; component kapanırken yalnızca bu
+  // oturuma ait object URL'ler serbest bırakılır.
+  useEffect(() => {
+    return () => {
+      revokeTrackedObjectUrls({
+        refByObjectUrl: refByObjectUrl.current,
+        trackedObjectUrls: trackedObjectUrls.current,
+      });
     };
   }, []);
 
@@ -149,8 +173,14 @@ export function usePersistedGrid(): PersistedGrid {
 
   const persistUpload = useCallback(async (objectUrl: string) => {
     if (!objectUrl.startsWith("blob:")) return;
+    trackedObjectUrls.current.add(objectUrl);
     try {
       const ref = await persistObjectUrl(objectUrl);
+      // Görsel kalıcılaştırılırken state'ten çıktıysa yeni Blob'u da bırak.
+      if (!trackedObjectUrls.current.has(objectUrl)) {
+        await deleteStoredImage(ref);
+        return;
+      }
       refByObjectUrl.current.set(objectUrl, ref);
     } catch (error) {
       // IndexedDB yoksa/kötüyse görsel yalnızca bu oturumda kalır;
@@ -168,33 +198,61 @@ export function usePersistedGrid(): PersistedGrid {
       if (
         next.profileImageUrl &&
         next.profileImageUrl !== previous &&
-        next.profileImageUrl.startsWith("blob:")
+        next.profileImageUrl.startsWith("blob:") &&
+        !refByObjectUrl.current.has(next.profileImageUrl)
       ) {
         void persistUpload(next.profileImageUrl);
       }
-      setState((prev) => ({ ...prev, brand: next }));
+      const previousState = stateRef.current;
+      const nextState = { ...previousState, brand: next };
+      stateRef.current = nextState;
+      void cleanUpRemovedImages({
+        previousState,
+        nextState,
+        refByObjectUrl: refByObjectUrl.current,
+        trackedObjectUrls: trackedObjectUrls.current,
+      });
+      setState(nextState);
     },
     [persistUpload],
   );
 
   const setExistingPosts = useCallback(
     (next: ExistingPost[] | ((prev: ExistingPost[]) => ExistingPost[])) => {
-      setState((prev) => ({
-        ...prev,
+      const previousState = stateRef.current;
+      const nextState = {
+        ...previousState,
         existingPosts:
-          typeof next === "function" ? next(prev.existingPosts) : next,
-      }));
+          typeof next === "function" ? next(previousState.existingPosts) : next,
+      };
+      stateRef.current = nextState;
+      void cleanUpRemovedImages({
+        previousState,
+        nextState,
+        refByObjectUrl: refByObjectUrl.current,
+        trackedObjectUrls: trackedObjectUrls.current,
+      });
+      setState(nextState);
     },
     [],
   );
 
   const setPlannedPosts = useCallback(
     (next: PlannedPost[] | ((prev: PlannedPost[]) => PlannedPost[])) => {
-      setState((prev) => ({
-        ...prev,
+      const previousState = stateRef.current;
+      const nextState = {
+        ...previousState,
         plannedPosts:
-          typeof next === "function" ? next(prev.plannedPosts) : next,
-      }));
+          typeof next === "function" ? next(previousState.plannedPosts) : next,
+      };
+      stateRef.current = nextState;
+      void cleanUpRemovedImages({
+        previousState,
+        nextState,
+        refByObjectUrl: refByObjectUrl.current,
+        trackedObjectUrls: trackedObjectUrls.current,
+      });
+      setState(nextState);
     },
     [],
   );
@@ -202,14 +260,16 @@ export function usePersistedGrid(): PersistedGrid {
   const resetToDefaults = useCallback(async () => {
     clearPersistedState(getBrowserStorage());
     await clearStoredImages();
-    for (const objectUrl of refByObjectUrl.current.keys()) {
-      URL.revokeObjectURL(objectUrl);
-    }
-    refByObjectUrl.current.clear();
+    revokeTrackedObjectUrls({
+      refByObjectUrl: refByObjectUrl.current,
+      trackedObjectUrls: trackedObjectUrls.current,
+    });
     // Sıfırlama sonrası persist efekti varsayılanları geri yazmasın:
     // depo, ilk açılışta olduğu gibi temiz kalmalı.
     skipPersistRef.current = true;
-    setState(getDefaultAppState());
+    const defaults = getDefaultAppState();
+    stateRef.current = defaults;
+    setState(defaults);
   }, []);
 
   return {
