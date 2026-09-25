@@ -312,11 +312,11 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 
 
 
-\- \*\*Son güncelleme:\*\* 2026-09-25 (kalıcı görsel lifecycle cleanup)
+\- \*\*Son güncelleme:\*\* 2026-09-25 (salt-okunur paylaşım linki MVP)
 
-\- \*\*Güncelleyen:\*\* Codex (AI) — kalıcı görsel lifecycle cleanup
+\- \*\*Güncelleyen:\*\* Codex (AI) — salt-okunur paylaşım linki MVP
 
-\- \*\*Aktif iş:\*\* Kalıcı grid durumu ve lifecycle cleanup tamamlandı. Metaveri localStorage'da, yüklenen Blob'lar IndexedDB'de; `blob:` URL'ler localStorage'a yazılmaz. Mevcut/planlanan yüklemeler silinince, profil görseli değiştirilince veya kaldırılınca kullanılmayan IndexedDB Blob'u ve object URL'i temizlenir. Reset ve hook unmount da object URL'leri serbest bırakır. Sonraki iş: salt-okunur paylaşım linki (geliştirme sırası 7).
+\- \*\*Aktif iş:\*\* Salt-okunur paylaşım linki MVP tamamlandı. Editör `/api/shares` ile immutable snapshot oluşturur; `/share/<token>` yalnızca marka ve grid önizlemesini gösterir. Sonraki iş: gerçek production share storage/deployment adapter'ı ve token geçersizleştirme politikası.
 
 \- \*\*Tamamlananlar:\*\*
   \- Next.js 15 (App Router) + TypeScript + Tailwind CSS v4 iskeleti kuruldu; Vitest test altyapısı eklendi.
@@ -342,6 +342,7 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
   \- **Lifecycle cleanup:** Silinen mevcut/planlanan yüklemeler ile değiştirilen/kaldırılan profil görsellerinin `idb:` referansı `refByObjectUrl` eşlemesinden çözülür; başka aktif kullanım yoksa `deleteStoredImage()` ile Blob silinir ve object URL `URL.revokeObjectURL()` ile serbest bırakılır. HTTP/HTTPS demo URL'leri etkilenmez. Reset/unmount URL cleanup'ı hata yalıtımlıdır.
   \- `GridManager` kalıcılığı dışarıdan alır (state + `persistUpload` + `resetToDefaults`); "Verileri sıfırla (demo verilere dön)" bölümü eklendi.
   \- Boş grid export koruması: `getExportAvailability` — butonlar `disabled` ve "Grid boş: …" açıklaması görünür.
+  \- **Aşama 5 — salt-okunur paylaşım:** `ShareSnapshot` strict doğrulaması, UUID token helper'ı ve `ShareStore` sözleşmesi eklendi. `InMemoryShareStore` geçici adapter'ı snapshot JSON'unu tek Node sürecinde tutar; `/api/shares` snapshot oluşturur, `/share/[token]` ortak `GridPreview` ile salt-okunur gösterir. Snapshot editör değişikliklerinden bağımsızdır; `blob:` görseller taşınabilir `data:` URL'e çevrilir, `idb:`/`blob:` referansları reddedilir.
 
 \- \*\*Değiştirilen dosyalar:\*\* Aşama 2: `package.json`, `package-lock.json` (@dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities eklendi), `src/lib/validators.ts`, `src/lib/validators.test.ts`, `src/lib/post-ops.ts`, `src/lib/post-ops.test.ts`, `src/components/BrandEditor.tsx`, `src/components/ExistingPostList.tsx`, `src/components/PlannedPostSorter.tsx`, `src/components/GridManager.tsx`, `src/components/GridPreview.tsx`, `src/app/page.tsx`, `AI-HANDOFF.md`. Önceki aşamadan: `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `vitest.config.ts`, `.gitignore`, `src/lib/types.ts`, `src/lib/grid.ts`, `src/lib/grid.test.ts`, `src/app/layout.tsx`, `src/app/globals.css`, `src/data/sample-data.ts`. Aşama 3: `src/lib/export.ts`, `src/lib/export.test.ts`, `src/lib/order.test.ts`, `src/components/ExportPanel.tsx`, `src/components/GridManager.tsx`, `ai-handoff.md`, `.gitignore` (`dev.log` git index'inden çıkarıldı `git rm --cached`). Aşama 4: `src/lib/storage.ts`, `src/lib/storage.test.ts`, `src/lib/image-store.ts`, `src/hooks/use-persisted-grid.ts`, `src/lib/export.ts` (`getExportAvailability`), `src/lib/export.test.ts`, `src/components/GridManager.tsx`, `src/components/ExportPanel.tsx`, `ai-handoff.md`. Lifecycle cleanup: `src/lib/image-lifecycle.ts`, `src/lib/image-lifecycle.test.ts`, `src/lib/image-store.ts`, `src/hooks/use-persisted-grid.ts`, `src/components/BrandEditor.tsx`, `ai-handoff.md`.
 
@@ -351,11 +352,17 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 
 
 
+\- \*\*Aşama 5 dosyaları:\*\* `src/lib/share-token.ts`, `src/lib/share.ts`, `src/lib/share-store.ts`, `src/lib/share-client.ts`, `src/lib/share.test.ts`, `src/app/api/shares/route.ts`, `src/app/share/[token]/page.tsx`, `src/components/SharePanel.tsx`, `src/components/GridManager.tsx`, `ai-handoff.md`.
+
+\- \*\*Aşama 5 doğrulaması:\*\* `npm run typecheck` 0 hata; `npm test` 82/82 geçti; `npm run build` başarılı (`/api/shares`, `/share/[token]` dinamik route). Testler token, strict snapshot serialize/validation, brand/grid sırası-pinned-kaynak bilgisi, boş grid reddi, invalid/bulunamayan token, bozuk snapshot fallback, immutable davranış ve `blob:`/`idb:` reddini kapsar. Tarayıcı smoke: link yeni sekmede aynı 8 hücre / 3 satır / 2 pinned görünümü ve edit kontrolü olmadan açıldı; geçersiz token güvenli hata ekranına düştü; editörde marka değişse de eski snapshot değişmedi.
+
+\- \*\*Production storage/deployment gereksinimi:\*\* `InMemoryShareStore` tek uygulama sürecinin belleğinde yaşar; restart/deploy sonrası kayıtlar kaybolur ve çoklu instance/serverless dağıtımında farklı instance'a giden istek snapshot'ı bulamaz. Bu MVP yalnızca aynı çalışan uygulama örneğine yönlendirilen istemciler arasında çalışır. Gerçek cross-device garanti için shared database, görseller için object storage/CDN adapter'ı, TTL/revocation ve çoklu-instance uyumu gerekir. `data:` URL'e çevrilen upload'lar request/memory boyutunu artırır.
+
 \### Sonraki AI ne yapmalı?
 
 
 
-1\. Salt-okunur paylaşım linki MVP'sine başla (geliştirme sırası7): token'lı salt-okunur görüntüleme, geçersiz link hata ekranı, `## 13. Karar Kaydı`'na token/saklama kararı ekle. Kalıcılık tarafında bilinen ince nokta: kalıcı görsel silinirse (IndexedDB temizlenirse) ilgili gönderi metaveriden düşer; kullanıcıya "görsel bulunamadı" ayrıntısı eklenebilir.
+1\. Production share storage adapter'ına geç: `InMemoryShareStore` yerine shared database + object storage/CDN kullan; token TTL/revocation ve çoklu-instance davranışını tasarla. Kalıcılık tarafında kalıcı görsel silinirse ilgili gönderi metaveriden düşer; kullanıcıya "görsel bulunamadı" ayrıntısı eklenebilir.
 
 2\. Grid sıralama veya pinned davranışında değişiklik yapmadan önce `src/lib/grid.test.ts` ve `src/lib/post-ops.test.ts` içindeki birim testleri güncelle; yeni davranışı önce testle sabitle.
 
@@ -408,6 +415,8 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 | 2026-09-25 | Kalıcılık mimarisi: IndexedDB (görsel Blob'ları) + localStorage (küçük JSON metaveri), şema sürümü `STORAGE_VERSION=1`, `idb:<id>` referansları | Yüklenen görsel dosyaların yenilemede yaşaması için binary kalıcı depo gerekir; IndexedDB tarayıcı yerlisidir ve yeni bağımlılık eklemez. localStorage küçük metaveri için yeterlidir ama `blob:` object URL kabul edemez (yenilemede ölür) — bu yüzden state'teki `blob:` URL'ler yazılırken `idb:` referansına çevrilir (`toPersistableState`), haritada olmayan `blob:` hiç yazılmaz. Sürüm damgası bozuk/gelecek veriyi bilinçli olarak reddeder → demo varsayılanlarına düşülür. | `pdf-lib` gibi yeni dependency eklenmedi; kalıcılık mantığı `GridManager` dışında (`storage.ts`, `image-store.ts`, `use-persisted-grid.ts`). Sıfırlama localStorage + IndexedDB'yi temizler. |
 
 | 2026-09-25 | Boş gridde export üretilmez | Boş gridden blank PDF/JPG kullanıcıya değersizdir. | `getExportAvailability` ile butonlar `disabled` olur ve "Grid boş" açıklaması gösterilir. |
+
+| 2026-09-25 | Salt-okunur paylaşım snapshot/token/storage kararı: UUID token'lı immutable `ShareSnapshot`, `ShareStore` adapter sözleşmesi ve geçici process-geneli `InMemoryShareStore` | Editör localStorage/IndexedDB verisi başka tarayıcıda paylaşılmaz; snapshot ayrı oluşturulup strict doğrulanmalıdır. Production database/backend olmadığı için kalıcı cross-device garanti verilemez. `blob:` görseller `data:` URL'e dönüştürülür; `idb:`/`blob:` referansları reddedilir. | `/api/shares` snapshot oluşturur, `/share/[token]` yalnızca okunur render eder. Gerçek dağıtım için shared DB + object storage/CDN adapter'ı, TTL/revocation ve çoklu-instance uyumu gerekir. |
 
 
 

@@ -7,6 +7,7 @@ import ExistingPostList from "@/components/ExistingPostList";
 import ExportPanel from "@/components/ExportPanel";
 import GridPreview from "@/components/GridPreview";
 import PlannedPostSorter from "@/components/PlannedPostSorter";
+import SharePanel from "@/components/SharePanel";
 import { usePersistedGrid } from "@/hooks/use-persisted-grid";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import {
@@ -245,6 +246,8 @@ export default function GridManager() {
               },
             }}
           />
+
+          <SharePanel brand={brand} result={grid} />
 
           <section className="mt-4 rounded-lg border border-neutral-200 p-4">
             <h2 className="mb-2 text-sm font-semibold">Veriler</h2>
