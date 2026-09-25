@@ -7,11 +7,7 @@ import ExistingPostList from "@/components/ExistingPostList";
 import ExportPanel from "@/components/ExportPanel";
 import GridPreview from "@/components/GridPreview";
 import PlannedPostSorter from "@/components/PlannedPostSorter";
-import {
-  SAMPLE_BRAND,
-  SAMPLE_EXISTING_POSTS,
-  SAMPLE_PLANNED_POSTS,
-} from "@/data/sample-data";
+import { usePersistedGrid } from "@/hooks/use-persisted-grid";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import {
   addExistingPost,
@@ -26,7 +22,6 @@ import {
   unpinPost,
 } from "@/lib/post-ops";
 import { loadImageFile } from "@/lib/validators";
-import type { Brand, ExistingPost, PlannedPost } from "@/lib/types";
 
 const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabitlemek için önce pinned gönderilerden birinin sabitliğini kaldırın.`;
 
@@ -34,16 +29,21 @@ const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabit
  * MVP ikinci aşama ekranı: marka düzenleme, mevcut/planlanan gönderi yönetimi,
  * pinned yönetimi, anında güncellenen 3 sütunlu grid önizlemesi ve PDF/JPG dışa
  * aktarma alanı.
- * Durum yalnızca sayfa state'inde tutulur; yenilemede kaybolur (bu aşamada bilinçli).
+ * Durum `usePersistedGrid` ile kalıcıdır: metaveri localStorage'da, yüklenen
+ * görseller IndexedDB'de saklanır; yenilemede ve tarayıcı yeniden açılışında
+ * korunur. "Verileri sıfırla" demo verilere döner.
  */
 export default function GridManager() {
-  const [brand, setBrand] = useState<Brand>(SAMPLE_BRAND);
-  const [existingPosts, setExistingPosts] = useState<ExistingPost[]>(
-    SAMPLE_EXISTING_POSTS,
-  );
-  const [plannedPosts, setPlannedPosts] = useState<PlannedPost[]>(
-    SAMPLE_PLANNED_POSTS,
-  );
+  const {
+    brand,
+    existingPosts,
+    plannedPosts,
+    setBrand,
+    setExistingPosts,
+    setPlannedPosts,
+    persistUpload,
+    resetToDefaults,
+  } = usePersistedGrid();
   const [pinError, setPinError] = useState<string | null>(null);
   const [plannedError, setPlannedError] = useState<string | null>(null);
 
@@ -63,11 +63,14 @@ export default function GridManager() {
     [existingPosts],
   );
 
-  function handleExistingUpload(input: {
+  async function handleExistingUpload(input: {
     url: string;
     alt: string;
     recency: "enYeni" | "enEski";
   }) {
+    // Görsel önce IndexedDB'ye yazılır; state'e `blob:` URL girer, kalıcı
+    // metaveriye `idb:` referansı girer.
+    await persistUpload(input.url);
     const { posts } = addExistingPost(existingPosts, {
       imageUrl: input.url,
       alt: input.alt,
@@ -107,8 +110,9 @@ export default function GridManager() {
     setExistingPosts((prev) => reorderPinnedPosts(prev, orderedIds));
   }
 
-  function handlePlannedUpload(url: string, alt: string) {
+  async function handlePlannedUpload(url: string, alt: string) {
     setPlannedError(null);
+    await persistUpload(url);
     setPlannedPosts((prev) => addPlannedPost(prev, { imageUrl: url, alt }).posts);
   }
 
@@ -122,6 +126,16 @@ export default function GridManager() {
   }
 
   const canPinMore = grid.pinnedCount < MAX_PINNED;
+
+  async function handleReset() {
+    const confirmed = window.confirm(
+      "Tüm değişiklikler ve yüklenen görseller kalıcı olarak silinip demo verilere dönülecek. Devam edilsin mi?",
+    );
+    if (!confirmed) return;
+    await resetToDefaults();
+    setPinError(null);
+    setPlannedError(null);
+  }
   // Export, UI'da görülen sırayı aynen almalı: grid cellsdeki imageUrl'ler.
   const imageUrls = useMemo(
     () => grid.cells.map((cell) => Promise.resolve(cell.post.imageUrl)),
@@ -135,8 +149,8 @@ export default function GridManager() {
       </h1>
       <p className="mb-6 text-xs text-neutral-500">
         Marka bilgilerini düzenleyin, mevcut ve planlanan gönderileri yönetin;
-        sonuç anında 3 sütunlu profil gridinde görünür. Değişiklikler bu sayfa
-        oturumunda tutulur.
+        sonuç anında 3 sütunlu profil gridinde görünür. Değişiklikler ve
+        yüklenen görseller tarayıcınızda saklanır; yenilemede kaybolmaz.
       </p>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -231,6 +245,22 @@ export default function GridManager() {
               },
             }}
           />
+
+          <section className="mt-4 rounded-lg border border-neutral-200 p-4">
+            <h2 className="mb-2 text-sm font-semibold">Veriler</h2>
+            <p className="mb-3 text-xs text-neutral-500">
+              Marka bilgileri, gönderiler, sıralamalar ve yüklenen görseller bu
+              tarayıcıda saklanır (localStorage + IndexedDB). Sıfırlama demo
+              verilere döner ve kayıtlı verileri siler.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleReset()}
+              className="rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+            >
+              Verileri sıfırla (demo verilere dön)
+            </button>
+          </section>
         </div>
       </div>
     </div>

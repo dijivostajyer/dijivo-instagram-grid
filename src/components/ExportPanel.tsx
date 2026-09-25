@@ -9,6 +9,7 @@ import {
   buildFileName,
   buildJpgBytes,
   buildPdfBytes,
+  getExportAvailability,
   slugify,
 } from "@/lib/export";
 
@@ -121,6 +122,8 @@ export default function ExportPanel({
 
   const canExport =
     steps.every((s) => !s.loading) && busyRef.current === false;
+  // Boş gridde boş PDF/JPG üretilmez; butonlar kapalı ve açıklama görünür.
+  const availability = getExportAvailability(result.cells.length);
 
   return (
     <section className="rounded-lg border border-neutral-200 p-4">
@@ -133,7 +136,7 @@ export default function ExportPanel({
         <button
           type="button"
           onClick={() => void startExport("pdf")}
-          disabled={!canExport}
+          disabled={!canExport || !availability.enabled}
           className="inline-flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <DocumentTextIcon className="h-4 w-4" />
@@ -142,13 +145,17 @@ export default function ExportPanel({
         <button
           type="button"
           onClick={() => void startExport("jpg")}
-          disabled={!canExport}
+          disabled={!canExport || !availability.enabled}
           className="inline-flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ArrowDownTrayIcon className="h-4 w-4" />
           JPG İndir
         </button>
       </div>
+
+      {availability.enabled ? null : (
+        <p className="mt-3 text-xs text-neutral-500">{availability.message}</p>
+      )}
 
       {steps.some((s) => s.error) ? (
         <p role="alert" className="mt-3 text-xs font-medium text-red-600">
