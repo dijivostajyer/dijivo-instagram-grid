@@ -8,7 +8,9 @@ import { InMemoryShareStore, getShareStore } from "./share-store";
 
 const TOKEN = "3e1a1c76-7958-4d4f-86c6-2727195fd44c";
 const now = () => new Date("2026-09-25T12:00:00.000Z");
-const input = (): ShareSnapshotInput => ({ brand: { name: "Dijivo", username: "dijivo" }, cells: [{ id: "a", source: "mevcut", imageUrl: "data:image/png;base64,aGk=", position: 0, row: 0, column: 0, pinned: false }] });
+const PNG = "iVBORw0KGgo=";
+const JPEG = "/9j/";
+const input = (): ShareSnapshotInput => ({ brand: { name: "Dijivo", username: "dijivo" }, cells: [{ id: "a", source: "mevcut", imageUrl: `data:image/png;base64,${PNG}`, position: 0, row: 0, column: 0, pinned: false }] });
 
 function fakeDriver(): SupabaseShareDriver & { rows: Map<string, SnapshotRow>; uploads: string[]; removed: string[] } {
   const rows = new Map<string, SnapshotRow>();
@@ -30,8 +32,8 @@ describe("SupabaseShareStore", () => {
     expect(driver.rows.get(TOKEN)?.created_at).toBe(created.createdAt);
     expect((driver.rows.get(TOKEN)?.payload as { version: number }).version).toBe(driver.rows.get(TOKEN)?.version);
     expect(JSON.stringify(driver.rows.get(TOKEN)?.payload)).not.toContain("data:image");
-    expect(created.cells[0].imageUrl).toContain("https://signed.test/shares/");
-    expect(await store.get(TOKEN)).not.toBeNull();
+    expect(created.cells[0].imageUrl).toContain("storage:shares/");
+    expect((await store.get(TOKEN))?.cells[0].imageUrl).toContain("https://signed.test/shares/");
   });
 
   it("expired veya revoked snapshot'ı döndürmez", async () => {
@@ -45,6 +47,29 @@ describe("SupabaseShareStore", () => {
     const store = new SupabaseShareStore(driver, 30, () => TOKEN, now);
     await expect(store.create(input())).rejects.toThrow("insert failed");
     expect(driver.removed).toEqual(driver.uploads);
+  });
+
+  it("geçersiz binary veya MIME eşleşmesini reddeder", async () => {
+    const store = new SupabaseShareStore(fakeDriver(), 30, () => TOKEN, now);
+    await expect(store.create({ ...input(), cells: [{ ...input().cells[0], imageUrl: "data:image/png;base64,aGk=" }] })).rejects.toThrow();
+    await expect(store.create({ ...input(), cells: [{ ...input().cells[0], imageUrl: `data:image/jpeg;base64,${PNG}` }] })).rejects.toThrow();
+    await expect(store.create({ ...input(), cells: [{ ...input().cells[0], imageUrl: `data:image/jpeg;base64,${JPEG}` }] })).resolves.toBeTruthy();
+  });
+
+  it("sıralı upload hata sonrası başlatılmamış görsel bırakmaz", async () => {
+    const driver = fakeDriver(); let count = 0; let inserted = false;
+    driver.upload = async (path) => { count += 1; if (count === 2) throw new Error("upload failed"); driver.uploads.push(path); };
+    driver.insert = async () => { inserted = true; };
+    const cells = [0, 1, 2].map((position) => ({ ...input().cells[0], id: String(position), position, column: position, imageUrl: `data:image/png;base64,${PNG}` }));
+    await expect(new SupabaseShareStore(driver, 30, () => TOKEN, now).create({ ...input(), cells })).rejects.toThrow("upload failed");
+    expect(count).toBe(2); expect(driver.removed).toEqual(driver.uploads); expect(inserted).toBe(false);
+  });
+
+  it("create signed URL başarısız olsa da başarılı kalır; get imzalamada hata verir", async () => {
+    const driver = fakeDriver(); driver.sign = async () => { throw new Error("sign failed"); };
+    const store = new SupabaseShareStore(driver, 30, () => TOKEN, now);
+    await expect(store.create(input())).resolves.toBeTruthy();
+    await expect(store.get(TOKEN)).rejects.toThrow("sign failed");
   });
 
   it("production eksik env'de memory fallback yapmaz", () => {

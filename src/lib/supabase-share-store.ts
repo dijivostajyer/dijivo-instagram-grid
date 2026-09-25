@@ -27,6 +27,10 @@ function dataImage(value: string): { mime: string; bytes: Uint8Array; extension:
   const match = /^data:(image\/(jpeg|png|webp));base64,([a-z0-9+/=]+)$/i.exec(value);
   if (!match) return null;
   const bytes = new Uint8Array(Buffer.from(match[3], "base64"));
+  const png = bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, index) => bytes[index] === byte);
+  const jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const webp = bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+  if ((match[2] === "png" && !png) || (match[2] === "jpeg" && !jpeg) || (match[2] === "webp" && !webp)) return null;
   return { mime: match[1].toLowerCase(), bytes, extension: match[2] === "jpeg" ? "jpg" : match[2] };
 }
 
@@ -56,7 +60,7 @@ export class SupabaseShareStore implements ShareStore {
         const createdAt = this.now();
         const snapshot = createShareSnapshot(converted, token, createdAt.toISOString());
         await this.driver.insert({ token, version: snapshot.version, created_at: snapshot.createdAt, payload: snapshot, expires_at: addDays(createdAt, this.ttlDays).toISOString(), revoked_at: null });
-        return this.resolveStorageImages(snapshot);
+        return snapshot;
       } catch (error) {
         lastError = error;
         if (uploaded.length > 0) {
@@ -86,6 +90,7 @@ export class SupabaseShareStore implements ShareStore {
     let index = 0;
     const convert = async (url: string): Promise<string> => {
       const image = dataImage(url);
+      if (url.startsWith("data:image/") && !image) throw new Error("Paylaşım görseli geçersiz.");
       if (!image) return url;
       if (image.bytes.byteLength > MAX_SHARE_IMAGE_BYTES) throw new Error("Paylaşım için yüklenen görseller çok büyük.");
       total += image.bytes.byteLength;
@@ -96,10 +101,9 @@ export class SupabaseShareStore implements ShareStore {
       uploaded.push(path);
       return `storage:${path}`;
     };
-    return {
-      brand: { ...input.brand, profileImageUrl: input.brand.profileImageUrl ? await convert(input.brand.profileImageUrl) : undefined },
-      cells: await Promise.all(input.cells.map(async (cell) => ({ ...cell, imageUrl: await convert(cell.imageUrl) }))),
-    };
+    const cells = [];
+    for (const cell of input.cells) cells.push({ ...cell, imageUrl: await convert(cell.imageUrl) });
+    return { brand: { ...input.brand, profileImageUrl: input.brand.profileImageUrl ? await convert(input.brand.profileImageUrl) : undefined }, cells };
   }
 
   private async resolveStorageImages(snapshot: ShareSnapshot): Promise<ShareSnapshot> {
