@@ -45,36 +45,36 @@ function SortablePlannedItem({
     <li
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 rounded border p-2 ${
+      className={`flex items-center gap-3 rounded-xl bg-white p-2 outline-1 -outline-offset-1 outline-black/10 ${
         isDragging
-          ? "z-10 border-sky-500 bg-sky-50 shadow-md"
-          : "border-neutral-200 bg-white"
+          ? "z-10 ring-2 ring-sky-600 shadow-md"
+          : ""
       }`}
     >
       {/* dnd-kit sunucu/istemcide farklı aria-describedby üretir; güvenli sadeleştirme */}
       <button
         type="button"
         suppressHydrationWarning
-        className="cursor-grab touch-none rounded p-1 text-neutral-500 hover:bg-neutral-100 active:cursor-grabbing"
+        className="cursor-grab touch-none rounded-md p-1.5 text-neutral-500 hover:bg-neutral-100 active:cursor-grabbing"
         aria-label={`Sürükleyerek sırala: ${post.alt ?? post.id}`}
         {...attributes}
         {...listeners}
       >
-        ⠿
+        <span aria-hidden="true">⠿</span>
       </button>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={post.imageUrl}
         alt=""
-        className="h-12 w-12 shrink-0 rounded object-cover"
+        className="h-14 w-14 shrink-0 rounded-lg object-cover outline-1 -outline-offset-1 outline-black/5"
       />
-      <span className="min-w-0 flex-1 truncate text-xs text-neutral-700">
+      <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-700">
         {post.alt ?? post.id}
       </span>
       <button
         type="button"
         onClick={() => onDelete(post.id)}
-        className="shrink-0 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+        className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50"
         aria-label={`Sil: ${post.alt ?? post.id}`}
       >
         Sil

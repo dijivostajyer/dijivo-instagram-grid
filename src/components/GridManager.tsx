@@ -1,6 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowPathIcon,
+  CheckIcon,
+  Cog6ToothIcon,
+  PhotoIcon,
+  Squares2X2Icon,
+  XMarkIcon,
+} from "@heroicons/react/16/solid";
 
 import BrandEditor from "@/components/BrandEditor";
 import ExistingPostList from "@/components/ExistingPostList";
@@ -47,6 +55,9 @@ export default function GridManager() {
   } = usePersistedGrid();
   const [pinError, setPinError] = useState<string | null>(null);
   const [plannedError, setPlannedError] = useState<string | null>(null);
+  const [mediaTab, setMediaTab] = useState<"existing" | "planned">("existing");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
 
   const grid = useMemo(
     () => computeGrid(existingPosts, plannedPosts),
@@ -127,6 +138,9 @@ export default function GridManager() {
   }
 
   const canPinMore = grid.pinnedCount < MAX_PINNED;
+  const selectedExisting = existingPosts.find((post) => post.id === selectedPostId);
+  const selectedPlanned = plannedPosts.find((post) => post.id === selectedPostId);
+  const selectedPost = selectedExisting ?? selectedPlanned;
 
   async function handleReset() {
     const confirmed = window.confirm(
@@ -143,129 +157,94 @@ export default function GridManager() {
     [grid],
   );
 
+  const exportOptions = {
+    download: async (fileName: string, blob: Blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    },
+    showError: (message: string) => console.error("[export]", message),
+  };
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [profileOpen]);
+
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="mb-1 text-xl font-bold">
-        Dijivo Instagram Grid Preview
-      </h1>
-      <p className="mb-6 text-xs text-neutral-500">
-        Marka bilgilerini düzenleyin, mevcut ve planlanan gönderileri yönetin;
-        sonuç anında 3 sütunlu profil gridinde görünür. Değişiklikler ve
-        yüklenen görseller tarayıcınızda saklanır; yenilemede kaybolmaz.
-      </p>
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-4">
-          <BrandEditor brand={brand} onChange={setBrand} />
-
-          <ExistingPostList
-            posts={sortedExisting}
-            pinnedCount={grid.pinnedCount}
-            pinError={pinError}
-            onUpload={handleExistingUpload}
-            onDelete={handleDeleteExisting}
-            onTogglePin={handleTogglePin}
-            onMovePinned={handleMovePinned}
-          />
-
-          <section className="rounded-lg border border-neutral-200 p-4">
-            <h2 className="mb-3 text-sm font-semibold">
-              Planlanan Gönderiler
-            </h2>
-            <PlannedUpload onUpload={handlePlannedUpload} />
-            {plannedError ? (
-              <p role="alert" className="mb-2 text-xs font-medium text-red-600">
-                {plannedError}
-              </p>
-            ) : null}
-            {plannedPosts.length === 0 ? (
-              <p className="mt-3 rounded border border-dashed border-neutral-300 p-4 text-center text-xs text-neutral-500">
-                Henüz planlanan gönderi yok.
-              </p>
-            ) : (
-              <div className="mt-3">
-                <p className="mb-2 text-[11px] text-neutral-500">
-                  Sıralamak için tutamaçtan (⠿) sürükleyin; üstteki ilk
-                  yayınlanacak gönderidir.
-                </p>
-                <PlannedPostSorter
-                  posts={sortedPlanned}
-                  onReorder={handleReorderPlanned}
-                  onDelete={handleDeletePlanned}
-                />
-              </div>
-            )}
-          </section>
-        </div>
-
-        <div className="lg:sticky lg:top-6 lg:self-start">
-          <div className="rounded-lg border border-neutral-200 p-4">
-            {grid.cells.length === 0 ? (
-              <div className="rounded border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500">
-                Henüz gönderi yok. Sol taraftan mevcut veya planlanan içerik
-                ekleyin; grid burada görünür.
-              </div>
-            ) : (
-              <>
-                {canPinMore ? null : (
-                  <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
-                    Pinned limiti dolu ({MAX_PINNED}/{MAX_PINNED}). Yeni pin için
-                    önce birini kaldırın.
-                  </p>
-                )}
-                <GridPreview brand={brand} result={grid} />
-              </>
-            )}
-            <p className="mt-3 text-[11px] text-neutral-400">
-              Hücreler Instagram profilindeki gibi 1:1 kırpılır
-              ({GRID_COLUMNS} sütun).
-            </p>
+    <div className="min-h-screen bg-[#f6f7f5] text-neutral-900">
+      <header className="border-b border-black/5 bg-white/90">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-neutral-900 text-sm font-semibold text-white">D</div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">Dijivo Grid</p>
+              <p className="hidden text-sm text-neutral-500 sm:block">Instagram Grid Planner</p>
+            </div>
+          </div>
+          <div className="hidden items-center gap-2 text-sm text-neutral-500 md:flex">
+            <CheckIcon className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+            Tarayıcınıza kaydedildi
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" aria-label="Profil ayarları" onClick={() => setProfileOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600">
+              <Cog6ToothIcon className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Profil ayarları</span>
+            </button>
           </div>
         </div>
+      </header>
 
-        <div className="mx-auto mt-6 w-full max-w-2xl lg:mt-0 lg:self-start">
-          <ExportPanel
-            brand={brand}
-            result={grid}
-            imageUrls={imageUrls}
-            options={{
-              download: async (fileName, blob) => {
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = fileName;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-              },
-              showError: (message) => {
-                // Inline error is rendered by ExportPanel; a blocking alert()
-                // would freeze the UI thread during export failures.
-                console.error("[export]", message);
-              },
-            }}
-          />
-
-          <SharePanel brand={brand} result={grid} />
-
-          <section className="mt-4 rounded-lg border border-neutral-200 p-4">
-            <h2 className="mb-2 text-sm font-semibold">Veriler</h2>
-            <p className="mb-3 text-xs text-neutral-500">
-              Marka bilgileri, gönderiler, sıralamalar ve yüklenen görseller bu
-              tarayıcıda saklanır (localStorage + IndexedDB). Sıfırlama demo
-              verilere döner ve kayıtlı verileri siler.
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleReset()}
-              className="rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-            >
-              Verileri sıfırla (demo verilere dön)
-            </button>
-          </section>
+      <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:py-7">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-sm text-neutral-500">Aktif marka</p>
+            <h1 className="text-2xl font-semibold tracking-tight">{brand.name || "İsimsiz marka"}</h1>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-neutral-500"><Squares2X2Icon className="size-4" /> {grid.cells.length} içerik · {grid.pinnedCount} sabit</div>
         </div>
-      </div>
+
+        <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
+          <aside className="order-2 min-w-0 border-b border-black/10 pb-6 xl:order-none xl:border-b-0 xl:border-r xl:pr-6 xl:pb-0">
+            <div className="mb-4 flex items-center justify-between"><h2 className="text-sm font-semibold">İçerikler</h2><PhotoIcon className="size-4 text-neutral-400" /></div>
+            <div role="tablist" className="mb-4 flex border-b border-black/10 text-sm">
+              <button type="button" role="tab" aria-selected={mediaTab === "existing"} onClick={() => setMediaTab("existing")} className={`-mb-px border-b-2 px-3 py-2 font-medium ${mediaTab === "existing" ? "border-sky-700 text-neutral-900" : "border-transparent text-neutral-500 hover:text-neutral-900"}`}>Mevcut <span className="text-neutral-400">{existingPosts.length}</span></button>
+              <button type="button" role="tab" aria-selected={mediaTab === "planned"} onClick={() => setMediaTab("planned")} className={`-mb-px border-b-2 px-3 py-2 font-medium ${mediaTab === "planned" ? "border-sky-700 text-neutral-900" : "border-transparent text-neutral-500 hover:text-neutral-900"}`}>Planlanan <span className="text-neutral-400">{plannedPosts.length}</span></button>
+            </div>
+            {mediaTab === "existing" ? <ExistingPostList posts={sortedExisting} pinnedCount={grid.pinnedCount} pinError={pinError} onUpload={handleExistingUpload} onDelete={handleDeleteExisting} onTogglePin={handleTogglePin} onMovePinned={handleMovePinned} /> : (
+              <section>
+                <PlannedUpload onUpload={handlePlannedUpload} />
+                {plannedError ? <p role="alert" className="mt-3 text-sm text-red-700">{plannedError}</p> : null}
+                {plannedPosts.length === 0 ? <div className="mt-4 rounded-xl border border-dashed border-black/15 p-5 text-center text-sm text-neutral-500">Henüz planlanan gönderi yok.<br />İlk görselinizi yükleyin.</div> : <div className="mt-4"><p className="mb-3 text-sm text-neutral-500">Tutamacı sürükleyerek yayın sırasını değiştirin.</p><PlannedPostSorter posts={sortedPlanned} onReorder={handleReorderPlanned} onDelete={handleDeletePlanned} /></div>}
+              </section>
+            )}
+          </aside>
+
+          <section className="order-1 min-w-0 xl:order-none xl:px-2">
+            <div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-semibold">Instagram önizlemesi</h2><p className="mt-1 text-sm text-neutral-500">Planlanan içerikler gridde yayın sırasına göre görünür.</p></div><span className="hidden rounded-full bg-sky-50 px-2.5 py-1 text-sm font-medium text-sky-800 sm:inline">3 sütun</span></div>
+            {canPinMore ? null : <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Sabitlenmiş gönderi limiti dolu. Yeni bir pin için önce birini kaldırın.</p>}
+            {grid.cells.length === 0 ? <div className="grid min-h-96 place-items-center rounded-2xl border border-dashed border-black/15 bg-white p-8 text-center"><div><PhotoIcon className="mx-auto mb-3 size-6 text-neutral-400" /><h3 className="font-semibold">Grid henüz boş</h3><p className="mt-1 max-w-xs text-sm text-neutral-500">Sol panelden mevcut veya planlanan bir görsel ekleyerek başlayın.</p></div></div> : <div className="rounded-2xl bg-white p-4 shadow-[0_0_0_1px_rgba(0,0,0,.06),0_2px_8px_rgba(0,0,0,.04)] sm:p-6"><GridPreview brand={brand} result={grid} selectedPostId={selectedPostId} onSelectPost={setSelectedPostId} /></div>}
+            <p className="mt-3 text-sm text-neutral-500">Görseller Instagram profilindeki gibi merkezden 1:1 kırpılır ({GRID_COLUMNS} sütun).</p>
+          </section>
+
+          <aside className="order-3 min-w-0 border-t border-black/10 pt-6 xl:order-none xl:border-t-0 xl:border-l xl:pl-6 xl:pt-0">
+            <section className="border-b border-black/10 pb-5"><h2 className="text-sm font-semibold">Paylaş ve dışa aktar</h2><div className="mt-3"><SharePanel brand={brand} result={grid} compact /></div><div className="mt-3"><ExportPanel brand={brand} result={grid} imageUrls={imageUrls} options={exportOptions} compact /></div></section>
+            <section className="py-5"><h2 className="text-sm font-semibold">Seçili içerik</h2>{selectedPost ? <div className="mt-3"><img src={selectedPost.imageUrl} alt="" className="aspect-square w-full rounded-xl object-cover outline-1 -outline-offset-1 outline-black/10" /><p className="mt-3 truncate text-sm font-medium">{selectedPost.alt ?? "Görsel"}</p><p className="mt-1 text-sm text-neutral-500">{selectedExisting ? (selectedExisting.pinned ? "Sabitlenmiş mevcut gönderi" : "Mevcut gönderi") : "Planlanan gönderi"}</p>{selectedExisting ? <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleTogglePin(selectedExisting.id, selectedExisting.pinned)} className="h-9 rounded-lg border border-black/10 px-3 text-sm font-medium hover:bg-neutral-50">{selectedExisting.pinned ? "Pin kaldır" : "Pinle"}</button><button type="button" onClick={() => handleDeleteExisting(selectedExisting.id)} className="h-9 rounded-lg px-3 text-sm font-medium text-red-700 hover:bg-red-50">Sil</button></div> : selectedPlanned ? <button type="button" onClick={() => handleDeletePlanned(selectedPlanned.id)} className="mt-3 h-9 rounded-lg px-3 text-sm font-medium text-red-700 hover:bg-red-50">Sil</button> : null}</div> : <p className="mt-2 text-sm text-neutral-500">Gridden bir görsel seçerek ayrıntı ve hızlı aksiyonları görüntüleyin.</p>}</section>
+            <section className="border-t border-black/10 pt-5"><p className="text-sm font-medium text-neutral-700">Tehlikeli alan</p><p className="mt-1 text-sm text-neutral-500">Tüm yerel verileri silip demo duruma döner.</p><button type="button" onClick={() => void handleReset()} className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium text-red-700 hover:bg-red-50"><ArrowPathIcon className="size-4" /> Demo verilere dön</button></section>
+          </aside>
+        </div>
+      </main>
+
+      {profileOpen ? <div className="fixed inset-0 z-50 flex justify-end bg-black/20 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Profil ayarları"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl sm:rounded-2xl"><div className="mb-6 flex items-center justify-between"><div><h2 className="text-lg font-semibold">Profil ayarları</h2><p className="mt-1 text-sm text-neutral-500">Değişiklikler otomatik kaydedilir.</p></div><button type="button" autoFocus onClick={() => setProfileOpen(false)} aria-label="Profil ayarlarını kapat" className="grid size-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100"><XMarkIcon className="size-4" /></button></div><BrandEditor brand={brand} onChange={setBrand} /></div></div> : null}
     </div>
   );
 }
@@ -301,7 +280,7 @@ function PlannedUpload({
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={busy}
-        className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        className="inline-flex h-9 items-center rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
       >
         {busy ? "Yükleniyor…" : "Görsel yükle"}
       </button>

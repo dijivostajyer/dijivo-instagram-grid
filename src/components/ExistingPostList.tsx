@@ -51,20 +51,17 @@ export default function ExistingPostList({
   }
 
   return (
-    <section className="rounded-lg border border-neutral-200 p-4">
-      <h2 className="mb-3 text-sm font-semibold">Mevcut Gönderiler</h2>
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <label className="text-xs text-neutral-600" htmlFor="recency-select">
-          Yeni gönderi şu konuma eklensin:
-        </label>
+    <section>
+      <div className="mb-4 grid gap-2">
+        <label className="text-sm text-neutral-600" htmlFor="recency-select">Yeni görsel konumu</label>
+        <div className="flex gap-2">
         <select
           id="recency-select"
           value={recency}
           onChange={(e) =>
             setRecency(e.target.value as "enYeni" | "enEski")
           }
-          className="rounded border border-neutral-300 px-2 py-1 text-xs"
+          className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-700"
         >
           <option value="enYeni">En yeni (gridin en üstü)</option>
           <option value="enEski">En eski (listeye ekle)</option>
@@ -73,7 +70,7 @@ export default function ExistingPostList({
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={busy}
-          className="rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          className="h-9 shrink-0 rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
         >
           {busy ? "Yükleniyor…" : "Görsel yükle"}
         </button>
@@ -84,49 +81,50 @@ export default function ExistingPostList({
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
+        </div>
       </div>
       {error ? (
-        <p role="alert" className="mb-2 text-xs font-medium text-red-600">
+        <p role="alert" className="mb-3 text-sm font-medium text-red-700">
           {error}
         </p>
       ) : null}
       {pinError ? (
-        <p role="alert" className="mb-2 text-xs font-medium text-red-600">
+        <p role="alert" className="mb-3 text-sm font-medium text-red-700">
           {pinError}
         </p>
       ) : null}
 
       {posts.length === 0 ? (
-        <p className="rounded border border-dashed border-neutral-300 p-4 text-center text-xs text-neutral-500">
+        <p className="rounded-xl border border-dashed border-black/15 p-5 text-center text-sm text-neutral-500">
           Henüz mevcut gönderi yok. Yukarıdan görsel yükleyin.
         </p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2">
           {posts.map((post) => (
             <li
               key={post.id}
-              className={`flex flex-wrap items-center gap-2 rounded border p-2 ${
+              className={`group relative overflow-hidden rounded-xl bg-white outline-1 -outline-offset-1 outline-black/10 ${
                 post.pinned
-                  ? "border-amber-300 bg-amber-50"
-                  : "border-neutral-200 bg-white"
+                  ? "ring-2 ring-inset ring-amber-400"
+                  : ""
               }`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={post.imageUrl}
                 alt=""
-                className="h-12 w-12 shrink-0 rounded object-cover"
+                className="aspect-square w-full object-cover"
               />
-              <span className="min-w-0 flex-1 truncate text-xs text-neutral-700">
+              <span className="block truncate px-2 pt-2 text-sm font-medium text-neutral-700">
                 {post.alt ?? post.id}
               </span>
 
               {post.pinned ? (
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 px-1 pt-1">
                   <button
                     type="button"
                     onClick={() => onMovePinned(post.id, -1)}
-                    className="rounded px-1.5 py-1 text-xs hover:bg-neutral-100"
+                    className="rounded-md px-1.5 py-1 text-sm hover:bg-neutral-100"
                     aria-label={`Pinned sırasında sola taşı: ${post.alt ?? post.id}`}
                   >
                     ←
@@ -134,7 +132,7 @@ export default function ExistingPostList({
                   <button
                     type="button"
                     onClick={() => onMovePinned(post.id, 1)}
-                    className="rounded px-1.5 py-1 text-xs hover:bg-neutral-100"
+                    className="rounded-md px-1.5 py-1 text-sm hover:bg-neutral-100"
                     aria-label={`Pinned sırasında sağa taşı: ${post.alt ?? post.id}`}
                   >
                     →
@@ -142,26 +140,28 @@ export default function ExistingPostList({
                 </div>
               ) : null}
 
+              <div className="flex items-center justify-between p-2 pt-1">
               <button
                 type="button"
                 onClick={() => onTogglePin(post.id, post.pinned)}
-                className="rounded px-2 py-1 text-xs hover:bg-neutral-100"
+                className="rounded-md px-2 py-1 text-sm font-medium hover:bg-neutral-100"
               >
                 {post.pinned ? "Pin kaldır" : "Pinle"}
               </button>
               <button
                 type="button"
                 onClick={() => onDelete(post.id)}
-                className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                className="rounded-md px-2 py-1 text-sm font-medium text-red-700 hover:bg-red-50"
                 aria-label={`Sil: ${post.alt ?? post.id}`}
               >
                 Sil
               </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      <p className="mt-2 text-[11px] text-neutral-400">
+      <p className="mt-3 text-sm text-neutral-500">
         {pinnedCount}/3 pinned
       </p>
     </section>
