@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ClipboardDocumentIcon, ShareIcon } from "@heroicons/react/16/solid";
 
 import { prepareShareInput } from "@/lib/share-client";
 import type { Brand, GridResult } from "@/lib/types";
@@ -8,9 +9,11 @@ import type { Brand, GridResult } from "@/lib/types";
 export default function SharePanel({
   brand,
   result,
+  compact = false,
 }: {
   brand: Brand;
   result: GridResult;
+  compact?: boolean;
 }) {
   const [link, setLink] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -56,9 +59,9 @@ export default function SharePanel({
 
   const disabled = busy || result.cells.length === 0;
   return (
-    <section className="mt-4 rounded-lg border border-neutral-200 p-4">
-      <h2 className="mb-2 text-sm font-semibold">Salt-okunur paylaşım</h2>
-      <p className="mb-3 text-xs text-neutral-500">
+    <section className={compact ? "" : "mt-4 rounded-xl border border-black/10 bg-white p-4"}>
+      {compact ? null : <h2 className="mb-2 text-sm font-semibold">Salt-okunur paylaşım</h2>}
+      <p className="mb-3 text-sm text-neutral-500">
         Bu anki gridin sabit bir kopyasını oluşturur. Sonraki düzenlemeler bu
         bağlantıdaki görünümü değiştirmez.
       </p>
@@ -66,28 +69,30 @@ export default function SharePanel({
         type="button"
         onClick={() => void createLink()}
         disabled={disabled}
-        className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-sky-700 px-3 text-sm font-medium text-white hover:bg-sky-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
+        <ShareIcon className="size-4" aria-hidden="true" />
         {busy ? "Bağlantı hazırlanıyor…" : "Paylaşım Linki Oluştur"}
       </button>
       {result.cells.length === 0 ? (
-        <p className="mt-2 text-xs text-neutral-500">Grid boş: paylaşım bağlantısı oluşturulamaz.</p>
+        <p className="mt-2 text-sm text-neutral-500">Grid boş: paylaşım bağlantısı oluşturulamaz.</p>
       ) : null}
       {link ? (
-        <div className="mt-3 rounded bg-neutral-50 p-2">
-          <a className="break-all text-xs text-sky-700 underline" href={link} target="_blank" rel="noreferrer">
+        <div className="mt-3 rounded-lg bg-neutral-50 p-3 ring-1 ring-black/5">
+          <a className="block break-all text-sm text-sky-800 underline" href={link} target="_blank" rel="noreferrer">
             {link}
           </a>
           <button
             type="button"
             onClick={() => void copyLink()}
-            className="mt-2 rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-white"
+            className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2.5 text-sm font-medium hover:bg-neutral-50"
           >
+            <ClipboardDocumentIcon className="size-4" aria-hidden="true" />
             Linki Kopyala
           </button>
         </div>
       ) : null}
-      {message ? <p role="status" className="mt-2 text-xs text-neutral-600">{message}</p> : null}
+      {message ? <p role="status" className="mt-2 text-sm text-neutral-600">{message}</p> : null}
     </section>
   );
 }

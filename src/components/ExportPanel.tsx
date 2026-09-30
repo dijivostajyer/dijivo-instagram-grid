@@ -28,6 +28,7 @@ export interface ExportPanelProps {
   result: GridResult;
   imageUrls: Promise<string>[];
   options: ExportOptions;
+  compact?: boolean;
 }
 
 /**
@@ -40,6 +41,7 @@ export default function ExportPanel({
   result,
   imageUrls,
   options,
+  compact = false,
 }: ExportPanelProps) {
   const { download, showError } = options;
   const [steps, setSteps] = useState<ExportStep[]>([
@@ -126,18 +128,15 @@ export default function ExportPanel({
   const availability = getExportAvailability(result.cells.length);
 
   return (
-    <section className="rounded-lg border border-neutral-200 p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-        <DocumentTextIcon className="h-4 w-4 text-neutral-500" />
-        İndir
-      </h2>
+    <section className={compact ? "" : "rounded-xl border border-black/10 bg-white p-4"}>
+      {compact ? <p className="mb-2 text-sm font-medium text-neutral-700">Dışa aktar</p> : <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><DocumentTextIcon className="h-4 w-4 text-neutral-500" /> İndir</h2>}
 
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => void startExport("pdf")}
           disabled={!canExport || !availability.enabled}
-          className="inline-flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <DocumentTextIcon className="h-4 w-4" />
           PDF İndir
@@ -146,7 +145,7 @@ export default function ExportPanel({
           type="button"
           onClick={() => void startExport("jpg")}
           disabled={!canExport || !availability.enabled}
-          className="inline-flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ArrowDownTrayIcon className="h-4 w-4" />
           JPG İndir
@@ -154,16 +153,16 @@ export default function ExportPanel({
       </div>
 
       {availability.enabled ? null : (
-        <p className="mt-3 text-xs text-neutral-500">{availability.message}</p>
+        <p className="mt-3 text-sm text-neutral-500">{availability.message}</p>
       )}
 
       {steps.some((s) => s.error) ? (
-        <p role="alert" className="mt-3 text-xs font-medium text-red-600">
+        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
           {steps.find((s) => s.error)?.error}
         </p>
       ) : null}
       {steps.every((s) => s.done) ? (
-        <p className="mt-3 text-xs text-green-700">Dosyalar indirildi.</p>
+        <p className="mt-3 text-sm text-green-700">Dosyalar indirildi.</p>
       ) : null}
     </section>
   );
