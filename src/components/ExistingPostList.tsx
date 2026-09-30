@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 import { loadImageFile } from "@/lib/validators";
-import type { ExistingPost } from "@/lib/types";
+import type { ExistingPost, PostType } from "@/lib/types";
 
 /**
  * Mevcut gönderi yönetimi: görsel yükleme, yayın sırası kontrolü
@@ -17,6 +17,7 @@ export default function ExistingPostList({
   onDelete,
   onTogglePin,
   onMovePinned,
+  onPostTypeChange,
 }: {
   posts: ExistingPost[];
   pinnedCount: number;
@@ -25,15 +26,18 @@ export default function ExistingPostList({
     url: string;
     alt: string;
     recency: "enYeni" | "enEski";
+    postType: PostType;
   }) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string, pinned: boolean) => void;
   onMovePinned: (id: string, direction: -1 | 1) => void;
+  onPostTypeChange: (id: string, postType: PostType) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [recency, setRecency] = useState<"enYeni" | "enEski">("enYeni");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [postType, setPostType] = useState<PostType>("post");
 
   async function handleFile(file: File | undefined) {
     if (!file) return;
@@ -41,7 +45,7 @@ export default function ExistingPostList({
     setBusy(true);
     try {
       const { url, alt } = await loadImageFile(file);
-      onUpload({ url, alt, recency });
+      onUpload({ url, alt, recency, postType });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Görsel yüklenemedi.");
     } finally {
@@ -65,6 +69,9 @@ export default function ExistingPostList({
         >
           <option value="enYeni">En yeni (gridin en üstü)</option>
           <option value="enEski">En eski (listeye ekle)</option>
+        </select>
+        <select aria-label="İçerik türü" value={postType} onChange={(e) => setPostType(e.target.value as PostType)} className="min-w-0 rounded-lg border border-black/10 bg-white px-2 py-2 text-sm">
+          <option value="post">Post</option><option value="reel">Reel</option><option value="carousel">Carousel</option>
         </select>
         <button
           type="button"
@@ -118,6 +125,9 @@ export default function ExistingPostList({
               <span className="block truncate px-2 pt-2 text-sm font-medium text-neutral-700">
                 {post.alt ?? post.id}
               </span>
+              <select aria-label={`${post.alt ?? post.id} içerik türü`} value={post.postType ?? "post"} onChange={(event) => onPostTypeChange(post.id, event.target.value as PostType)} className="mx-2 mt-1 w-[calc(100%-1rem)] rounded border border-black/10 bg-white px-1 py-1 text-xs">
+                <option value="post">Post</option><option value="reel">Reel</option><option value="carousel">Carousel</option>
+              </select>
 
               {post.pinned ? (
                 <div className="flex items-center gap-1 px-1 pt-1">

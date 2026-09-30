@@ -16,6 +16,7 @@ export default function SharePanel({
   compact?: boolean;
 }) {
   const [link, setLink] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,9 +39,26 @@ export default function SharePanel({
         throw new Error(isErrorResponse(body) ? body.error : "Paylaşım bağlantısı oluşturulamadı.");
       }
       setLink(`${window.location.origin}/share/${body.token}`);
+      setToken(body.token);
       setMessage("Salt-okunur paylaşım bağlantısı hazır.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Paylaşım bağlantısı oluşturulamadı.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revokeLink() {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/shares/${token}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Paylaşım bağlantısı kaldırılamadı.");
+      setLink(null);
+      setToken(null);
+      setMessage("Paylaşım bağlantısı kaldırıldı.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Paylaşım bağlantısı kaldırılamadı.");
     } finally {
       setBusy(false);
     }
@@ -90,6 +108,7 @@ export default function SharePanel({
             <ClipboardDocumentIcon className="size-4" aria-hidden="true" />
             Linki Kopyala
           </button>
+          <button type="button" onClick={() => void revokeLink()} className="mt-3 ml-2 inline-flex h-8 items-center rounded-md px-2.5 text-sm font-medium text-red-700 hover:bg-red-50">Bağlantıyı kaldır</button>
         </div>
       ) : null}
       {message ? <p role="status" className="mt-2 text-sm text-neutral-600">{message}</p> : null}

@@ -91,6 +91,17 @@ describe("serialize / deserialize", () => {
   });
 });
 
+describe("v1 proje migration", () => {
+  it("tek-grid v1 kaydını aktif projeye taşır ve eski post türünü post kabul eder", () => {
+    const old = { ...sampleState(), version: 1 };
+    const restored = deserializeAppState(JSON.stringify(old));
+    expect(restored?.version).toBe(STORAGE_VERSION);
+    expect(restored?.projects).toHaveLength(1);
+    expect(restored?.activeProjectId).toBe(restored?.projects?.[0].id);
+    expect(restored?.projects?.[0].existingPosts[0].postType).toBe("post");
+  });
+});
+
 describe("corrupted / mismatched data fallback", () => {
   it("geçersiz JSON null döner", () => {
     expect(deserializeAppState("{bozuk json")).toBeNull();

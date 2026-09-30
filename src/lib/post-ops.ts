@@ -1,4 +1,4 @@
-import type { ExistingPost, PlannedPost } from "./types";
+import type { ExistingPost, PlannedPost, PostType } from "./types";
 
 export const MAX_PINNED = 3;
 const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabitlemek için önce pinned gönderilerden birinin sabitliğini kaldırın.`;
@@ -88,7 +88,7 @@ export function reorderPinnedPosts(
  */
 export function addExistingPost(
   posts: ExistingPost[],
-  input: { imageUrl: string; alt?: string; recency: "enYeni" | "enEski" },
+  input: { imageUrl: string; alt?: string; recency: "enYeni" | "enEski"; postType?: PostType },
 ): { posts: ExistingPost[]; post: ExistingPost } {
   const maxRecency = posts.reduce((m, p) => Math.max(m, p.recencyIndex), -1);
   if (input.recency === "enYeni") {
@@ -98,6 +98,7 @@ export function addExistingPost(
       source: "mevcut",
       imageUrl: input.imageUrl,
       alt: input.alt,
+      postType: input.postType ?? "post",
       recencyIndex: 0,
       pinned: false,
     };
@@ -108,6 +109,7 @@ export function addExistingPost(
     source: "mevcut",
     imageUrl: input.imageUrl,
     alt: input.alt,
+    postType: input.postType ?? "post",
     recencyIndex: maxRecency + 1,
     pinned: false,
   };
@@ -128,7 +130,7 @@ export function deleteExistingPost(
 /** Yeni planlanan gönderi ekler: en yakın yayın olacak şekilde (planOrder 0). */
 export function addPlannedPost(
   posts: PlannedPost[],
-  input: { imageUrl: string; alt?: string },
+  input: { imageUrl: string; alt?: string; postType?: PostType },
 ): { posts: PlannedPost[]; post: PlannedPost } {
   const shifted = posts.map((p) => ({ ...p, planOrder: p.planOrder + 1 }));
   const post: PlannedPost = {
@@ -136,6 +138,7 @@ export function addPlannedPost(
     source: "planlanan",
     imageUrl: input.imageUrl,
     alt: input.alt,
+    postType: input.postType ?? "post",
     planOrder: 0,
   };
   return { posts: [post, ...shifted], post };

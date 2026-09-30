@@ -91,6 +91,29 @@ export default function BrandEditor({
               onChange={(e) => onChange({ ...brand, name: e.target.value })}
             />
           </div>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ["postCount", "Gönderi"],
+              ["followersCount", "Takipçi"],
+              ["followingCount", "Takip"],
+            ] as const).map(([field, label]) => (
+              <label key={field} className={labelClass}>{label}
+                <input type="number" min="0" className={inputClass} value={brand[field] ?? 0} onChange={(event) => onChange({ ...brand, [field]: Math.max(0, Number(event.target.value) || 0) })} />
+              </label>
+            ))}
+          </div>
+          <div>
+            <p className={labelClass}>Öne çıkanlar</p>
+            <div className="mt-2 grid gap-2">
+              {(brand.highlights ?? []).map((highlight) => (
+                <div className="flex gap-2" key={highlight.id}>
+                  <input aria-label="Öne çıkan başlığı" className={inputClass} value={highlight.title} onChange={(event) => onChange({ ...brand, highlights: (brand.highlights ?? []).map((item) => item.id === highlight.id ? { ...item, title: event.target.value } : item) })} />
+                  <button type="button" className="rounded-md px-2 text-sm text-red-700 hover:bg-red-50" onClick={() => onChange({ ...brand, highlights: (brand.highlights ?? []).filter((item) => item.id !== highlight.id) })}>Sil</button>
+                </div>
+              ))}
+              <button type="button" className="w-fit rounded-md border border-black/10 px-2 py-1 text-sm font-medium hover:bg-neutral-50" onClick={() => onChange({ ...brand, highlights: [...(brand.highlights ?? []), { id: `highlight-${Date.now()}`, title: "Yeni öne çıkan" }] })}>Öne çıkan ekle</button>
+            </div>
+          </div>
           <div>
             <label className={labelClass} htmlFor="brand-username">
               Kullanıcı adı

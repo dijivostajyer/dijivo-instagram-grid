@@ -18,14 +18,16 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import type { PlannedPost } from "@/lib/types";
+import type { PlannedPost, PostType } from "@/lib/types";
 
 function SortablePlannedItem({
   post,
   onDelete,
+  onPostTypeChange,
 }: {
   post: PlannedPost;
   onDelete: (id: string) => void;
+  onPostTypeChange: (id: string, type: PostType) => void;
 }) {
   const {
     attributes,
@@ -71,6 +73,9 @@ function SortablePlannedItem({
       <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-700">
         {post.alt ?? post.id}
       </span>
+      <select aria-label={`${post.alt ?? post.id} içerik türü`} value={post.postType ?? "post"} onChange={(event) => onPostTypeChange(post.id, event.target.value as PostType)} className="rounded border border-black/10 bg-white px-1 py-1 text-xs">
+        <option value="post">Post</option><option value="reel">Reel</option><option value="carousel">Carousel</option>
+      </select>
       <button
         type="button"
         onClick={() => onDelete(post.id)}
@@ -91,10 +96,12 @@ export default function PlannedPostSorter({
   posts,
   onReorder,
   onDelete,
+  onPostTypeChange,
 }: {
   posts: PlannedPost[];
   onReorder: (orderedIds: string[]) => void;
   onDelete: (id: string) => void;
+  onPostTypeChange: (id: string, type: PostType) => void;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -124,7 +131,7 @@ export default function PlannedPostSorter({
       >
         <ul className="flex flex-col gap-2">
           {posts.map((post) => (
-            <SortablePlannedItem key={post.id} post={post} onDelete={onDelete} />
+            <SortablePlannedItem key={post.id} post={post} onDelete={onDelete} onPostTypeChange={onPostTypeChange} />
           ))}
         </ul>
       </SortableContext>

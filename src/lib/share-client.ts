@@ -34,7 +34,14 @@ export async function prepareShareInput(
     ? await imageUrlForShare(input.brand.profileImageUrl, fetchImage)
     : undefined;
   return {
-    brand: { ...input.brand, profileImageUrl },
+    brand: {
+      ...input.brand,
+      profileImageUrl,
+      highlights: await Promise.all((input.brand.highlights ?? []).map(async (highlight) => ({
+        ...highlight,
+        imageUrl: highlight.imageUrl ? await imageUrlForShare(highlight.imageUrl, fetchImage) : undefined,
+      }))),
+    },
     cells: await Promise.all(
       input.cells.map(async (cell) => ({
         ...cell,

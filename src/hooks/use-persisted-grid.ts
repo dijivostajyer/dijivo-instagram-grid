@@ -25,18 +25,22 @@ import {
   toPersistableState,
   writePersistedState,
   type PersistedAppState,
+  createProjectFromState,
+  type GridProject,
   type StorageLike,
 } from "@/lib/storage";
 import type { Brand, ExistingPost, PlannedPost } from "@/lib/types";
 
 /** Demo/varsayılan durum (ilk açılış ve sıfırlama sonrası). */
 export function getDefaultAppState(): PersistedAppState {
-  return {
+  const base = {
     version: STORAGE_VERSION,
     brand: { ...SAMPLE_BRAND },
     existingPosts: SAMPLE_EXISTING_POSTS.map((post) => ({ ...post })),
     plannedPosts: SAMPLE_PLANNED_POSTS.map((post) => ({ ...post })),
   };
+  const project = createProjectFromState(base);
+  return { ...base, projects: [project], activeProjectId: project.id };
 }
 
 function getBrowserStorage(): StorageLike | null {
@@ -83,11 +87,22 @@ async function hydrateState(
     plannedPosts.push({ ...post, imageUrl });
   }
 
-  return {
+  const hydrated = {
     version: STORAGE_VERSION,
     brand: { ...state.brand, profileImageUrl },
     existingPosts,
     plannedPosts,
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+  };
+  return syncActiveProject(hydrated);
+}
+
+function syncActiveProject(state: PersistedAppState): PersistedAppState {
+  if (!state.projects?.length || !state.activeProjectId) return state;
+  return {
+    ...state,
+    projects: state.projects.map((project) => project.id === state.activeProjectId ? { ...project, brand: state.brand, existingPosts: state.existingPosts, plannedPosts: state.plannedPosts, updatedAt: new Date().toISOString() } : project),
   };
 }
 
@@ -104,6 +119,10 @@ export interface PersistedGrid {
   persistUpload: (objectUrl: string) => Promise<void>;
   /** Kalıcı veriyi siler ve demo varsayılanlarına döner. */
   resetToDefaults: () => Promise<void>;
+  projects: GridProject[];
+  activeProjectId: string;
+  selectProject: (id: string) => void;
+  createProject: (name: string, month: number, year: number, copyPrevious: boolean) => void;
 }
 
 /**
@@ -204,7 +223,7 @@ export function usePersistedGrid(): PersistedGrid {
         void persistUpload(next.profileImageUrl);
       }
       const previousState = stateRef.current;
-      const nextState = { ...previousState, brand: next };
+      const nextState = syncActiveProject({ ...previousState, brand: next });
       stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
@@ -220,11 +239,11 @@ export function usePersistedGrid(): PersistedGrid {
   const setExistingPosts = useCallback(
     (next: ExistingPost[] | ((prev: ExistingPost[]) => ExistingPost[])) => {
       const previousState = stateRef.current;
-      const nextState = {
+      const nextState = syncActiveProject({
         ...previousState,
         existingPosts:
           typeof next === "function" ? next(previousState.existingPosts) : next,
-      };
+      });
       stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
@@ -240,11 +259,11 @@ export function usePersistedGrid(): PersistedGrid {
   const setPlannedPosts = useCallback(
     (next: PlannedPost[] | ((prev: PlannedPost[]) => PlannedPost[])) => {
       const previousState = stateRef.current;
-      const nextState = {
+      const nextState = syncActiveProject({
         ...previousState,
         plannedPosts:
           typeof next === "function" ? next(previousState.plannedPosts) : next,
-      };
+      });
       stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
@@ -272,6 +291,35 @@ export function usePersistedGrid(): PersistedGrid {
     setState(defaults);
   }, []);
 
+  const selectProject = useCallback((id: string) => {
+    const current = stateRef.current;
+    const project = current.projects?.find((item) => item.id === id);
+    if (!project) return;
+    const next = { ...current, activeProjectId: id, brand: project.brand, existingPosts: project.existingPosts, plannedPosts: project.plannedPosts };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
+  const createProject = useCallback((name: string, month: number, year: number, copyPrevious: boolean) => {
+    const current = syncActiveProject(stateRef.current);
+    const source = copyPrevious ? { brand: current.brand, existingPosts: current.existingPosts, plannedPosts: current.plannedPosts } : { brand: { ...current.brand, profileImageUrl: undefined }, existingPosts: [], plannedPosts: [] };
+    const timestamp = new Date().toISOString();
+    const project: GridProject = {
+      id: `project-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+      name: name.trim() || `${month}/${year}`,
+      month,
+      year,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      brand: { ...source.brand, highlights: source.brand.highlights?.map((highlight) => ({ ...highlight })) },
+      existingPosts: source.existingPosts.map((post) => ({ ...post, id: `existing-${timestamp}-${post.id}` })),
+      plannedPosts: source.plannedPosts.map((post) => ({ ...post, id: `planned-${timestamp}-${post.id}` })),
+    };
+    const next = { ...current, activeProjectId: project.id, brand: project.brand, existingPosts: project.existingPosts, plannedPosts: project.plannedPosts, projects: [...(current.projects ?? []), project] };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   return {
     brand: state.brand,
     existingPosts: state.existingPosts,
@@ -282,5 +330,9 @@ export function usePersistedGrid(): PersistedGrid {
     setPlannedPosts,
     persistUpload,
     resetToDefaults,
+    projects: state.projects ?? [],
+    activeProjectId: state.activeProjectId ?? "",
+    selectProject,
+    createProject,
   };
 }

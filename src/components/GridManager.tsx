@@ -31,6 +31,7 @@ import {
   unpinPost,
 } from "@/lib/post-ops";
 import { loadImageFile } from "@/lib/validators";
+import type { PostType } from "@/lib/types";
 
 const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabitlemek için önce pinned gönderilerden birinin sabitliğini kaldırın.`;
 
@@ -52,12 +53,17 @@ export default function GridManager() {
     setPlannedPosts,
     persistUpload,
     resetToDefaults,
+    projects,
+    activeProjectId,
+    selectProject,
+    createProject,
   } = usePersistedGrid();
   const [pinError, setPinError] = useState<string | null>(null);
   const [plannedError, setPlannedError] = useState<string | null>(null);
   const [mediaTab, setMediaTab] = useState<"existing" | "planned">("existing");
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const grid = useMemo(
     () => computeGrid(existingPosts, plannedPosts),
@@ -79,6 +85,7 @@ export default function GridManager() {
     url: string;
     alt: string;
     recency: "enYeni" | "enEski";
+    postType: PostType;
   }) {
     // Görsel önce IndexedDB'ye yazılır; state'e `blob:` URL girer, kalıcı
     // metaveriye `idb:` referansı girer.
@@ -87,12 +94,17 @@ export default function GridManager() {
       imageUrl: input.url,
       alt: input.alt,
       recency: input.recency,
+      postType: input.postType,
     });
     setExistingPosts(posts);
   }
 
   function handleDeleteExisting(id: string) {
     setExistingPosts((prev) => deleteExistingPost(prev, id));
+  }
+
+  function handleExistingPostTypeChange(id: string, postType: PostType) {
+    setExistingPosts((posts) => posts.map((post) => post.id === id ? { ...post, postType } : post));
   }
 
   function handleTogglePin(id: string, pinned: boolean) {
@@ -122,10 +134,14 @@ export default function GridManager() {
     setExistingPosts((prev) => reorderPinnedPosts(prev, orderedIds));
   }
 
-  async function handlePlannedUpload(url: string, alt: string) {
+  async function handlePlannedUpload(url: string, alt: string, postType: PostType) {
     setPlannedError(null);
     await persistUpload(url);
-    setPlannedPosts((prev) => addPlannedPost(prev, { imageUrl: url, alt }).posts);
+    setPlannedPosts((prev) => addPlannedPost(prev, { imageUrl: url, alt, postType }).posts);
+  }
+
+  function handlePlannedPostTypeChange(id: string, postType: PostType) {
+    setPlannedPosts((posts) => posts.map((post) => post.id === id ? { ...post, postType } : post));
   }
 
   function handleDeletePlanned(id: string) {
@@ -212,6 +228,14 @@ export default function GridManager() {
           </div>
           <div className="flex items-center gap-2 text-sm text-neutral-500"><Squares2X2Icon className="size-4" /> {grid.cells.length} içerik · {grid.pinnedCount} sabit</div>
         </div>
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-black/10 bg-white p-3">
+          <label className="text-sm font-medium" htmlFor="project-select">Aylık proje</label>
+          <select id="project-select" value={activeProjectId} onChange={(event) => selectProject(event.target.value)} className="rounded-lg border border-black/10 px-2 py-1.5 text-sm">
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.month}/{project.year}</option>)}
+          </select>
+          <button type="button" onClick={() => setNewProjectOpen((open) => !open)} className="rounded-lg border border-black/10 px-2 py-1.5 text-sm font-medium hover:bg-neutral-50">Yeni ay</button>
+          {newProjectOpen ? <ProjectCreator onCreate={(name, month, year, copyPrevious) => { createProject(name, month, year, copyPrevious); setNewProjectOpen(false); }} /> : null}
+        </div>
 
         <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
           <aside className="order-2 min-w-0 border-b border-black/10 pb-6 xl:order-none xl:border-b-0 xl:border-r xl:pr-6 xl:pb-0">
@@ -220,11 +244,11 @@ export default function GridManager() {
               <button type="button" role="tab" aria-selected={mediaTab === "existing"} onClick={() => setMediaTab("existing")} className={`-mb-px border-b-2 px-3 py-2 font-medium ${mediaTab === "existing" ? "border-sky-700 text-neutral-900" : "border-transparent text-neutral-500 hover:text-neutral-900"}`}>Mevcut <span className="text-neutral-400">{existingPosts.length}</span></button>
               <button type="button" role="tab" aria-selected={mediaTab === "planned"} onClick={() => setMediaTab("planned")} className={`-mb-px border-b-2 px-3 py-2 font-medium ${mediaTab === "planned" ? "border-sky-700 text-neutral-900" : "border-transparent text-neutral-500 hover:text-neutral-900"}`}>Planlanan <span className="text-neutral-400">{plannedPosts.length}</span></button>
             </div>
-            {mediaTab === "existing" ? <ExistingPostList posts={sortedExisting} pinnedCount={grid.pinnedCount} pinError={pinError} onUpload={handleExistingUpload} onDelete={handleDeleteExisting} onTogglePin={handleTogglePin} onMovePinned={handleMovePinned} /> : (
+            {mediaTab === "existing" ? <ExistingPostList posts={sortedExisting} pinnedCount={grid.pinnedCount} pinError={pinError} onUpload={handleExistingUpload} onDelete={handleDeleteExisting} onTogglePin={handleTogglePin} onMovePinned={handleMovePinned} onPostTypeChange={handleExistingPostTypeChange} /> : (
               <section>
                 <PlannedUpload onUpload={handlePlannedUpload} />
                 {plannedError ? <p role="alert" className="mt-3 text-sm text-red-700">{plannedError}</p> : null}
-                {plannedPosts.length === 0 ? <div className="mt-4 rounded-xl border border-dashed border-black/15 p-5 text-center text-sm text-neutral-500">Henüz planlanan gönderi yok.<br />İlk görselinizi yükleyin.</div> : <div className="mt-4"><p className="mb-3 text-sm text-neutral-500">Tutamacı sürükleyerek yayın sırasını değiştirin.</p><PlannedPostSorter posts={sortedPlanned} onReorder={handleReorderPlanned} onDelete={handleDeletePlanned} /></div>}
+                {plannedPosts.length === 0 ? <div className="mt-4 rounded-xl border border-dashed border-black/15 p-5 text-center text-sm text-neutral-500">Henüz planlanan gönderi yok.<br />İlk görselinizi yükleyin.</div> : <div className="mt-4"><p className="mb-3 text-sm text-neutral-500">Tutamacı sürükleyerek yayın sırasını değiştirin.</p><PlannedPostSorter posts={sortedPlanned} onReorder={handleReorderPlanned} onDelete={handleDeletePlanned} onPostTypeChange={handlePlannedPostTypeChange} /></div>}
               </section>
             )}
           </aside>
@@ -253,25 +277,31 @@ export default function GridManager() {
 function PlannedUpload({
   onUpload,
 }: {
-  onUpload: (url: string, alt: string) => void;
+  onUpload: (url: string, alt: string, postType: PostType) => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [postType, setPostType] = useState<PostType>("post");
 
-  async function handleFile(file: File | undefined) {
-    if (!file) return;
+  async function handleFiles(files: FileList | null) {
+    if (!files?.length) return;
     setError(null);
     setBusy(true);
-    try {
-      const { url, alt } = await loadImageFile(file);
-      onUpload(url, alt);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Görsel yüklenemedi.");
-    } finally {
-      setBusy(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+    const failures: string[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const { url, alt } = await loadImageFile(file);
+        await onUpload(url, alt, postType);
+      } catch (e) {
+        failures.push(`${file.name}: ${e instanceof Error ? e.message : "Görsel yüklenemedi."}`);
+      }
     }
+    if (failures.length) {
+      setError(failures.join(" "));
+    }
+    setBusy(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   return (
@@ -284,12 +314,16 @@ function PlannedUpload({
       >
         {busy ? "Yükleniyor…" : "Görsel yükle"}
       </button>
+      <select aria-label="Planlanan içerik türü" value={postType} onChange={(event) => setPostType(event.target.value as PostType)} className="ml-2 h-9 rounded-lg border border-black/10 bg-white px-2 text-sm">
+        <option value="post">Post</option><option value="reel">Reel</option><option value="carousel">Carousel</option>
+      </select>
       <input
         ref={fileInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
+        multiple
         className="hidden"
-        onChange={(e) => handleFile(e.target.files?.[0])}
+        onChange={(e) => void handleFiles(e.target.files)}
       />
       {error ? (
         <p role="alert" className="mt-2 text-xs font-medium text-red-600">
@@ -298,4 +332,19 @@ function PlannedUpload({
       ) : null}
     </div>
   );
+}
+
+function ProjectCreator({ onCreate }: { onCreate: (name: string, month: number, year: number, copyPrevious: boolean) => void }) {
+  const now = new Date();
+  const [name, setName] = useState("");
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [copyPrevious, setCopyPrevious] = useState(false);
+  return <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); onCreate(name, month, year, copyPrevious); }}>
+    <input aria-label="Proje adı" value={name} onChange={(event) => setName(event.target.value)} placeholder="Proje adı" className="w-28 rounded-lg border border-black/10 px-2 py-1.5 text-sm" />
+    <input aria-label="Ay" type="number" min="1" max="12" value={month} onChange={(event) => setMonth(Number(event.target.value))} className="w-14 rounded-lg border border-black/10 px-2 py-1.5 text-sm" />
+    <input aria-label="Yıl" type="number" min="2020" value={year} onChange={(event) => setYear(Number(event.target.value))} className="w-20 rounded-lg border border-black/10 px-2 py-1.5 text-sm" />
+    <label className="text-sm"><input type="checkbox" checked={copyPrevious} onChange={(event) => setCopyPrevious(event.target.checked)} /> Öncekini kopyala</label>
+    <button type="submit" className="rounded-lg bg-neutral-900 px-2 py-1.5 text-sm font-medium text-white">Oluştur</button>
+  </form>;
 }

@@ -402,6 +402,15 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 
 
 
+\- **Son güncelleme:** 2026-09-30
+\- **Aktif iş:** Original-scope completion (özellik kapsama tamamlama).
+\- **Tamamlananlar:** Profil istatistikleri ve öne çıkanlar; post/reel/carousel metadata ve gösterge; çoklu planlanan görsel yükleme; aylık proje seçimi/oluşturma ve v1→v2 migration; immutable share snapshot'a yeni alanlar; share revoke UI/endpoint; A4 300 DPI raster export.
+\- **Değiştirilen dosyalar:** `src/lib/types.ts`, `storage.ts`, `post-ops.ts`, `validators.ts`, `share.ts`, `share-client.ts`, `export.ts`, `use-persisted-grid.ts`; ilgili bileşenler, share route/page ve iki test dosyası.
+\- **Testler ve sonuçları:** `npm run typecheck` PASS; `npm test` 94/94 PASS; `npm run build` PASS.
+\- **Manuel smoke:** Tarayıcı otomasyon bağlantısı kapanırken localhost dev server 500 döndü; production build başarılıdır, fakat bu oturumda görsel smoke tamamlanamadı.
+\- **Gerçek riskler:** Aylık proje kopyasında görsel Blob referansları ortak kullanılır; aktif proje silinmediği sürece güvenlidir, fakat tüm projeler arası ref-count cleanup için ek regression testi gerekir. PDF sayfa içe aktarma ağır bir rasterizer dependency olmadan desteklenmez ve ertelendi.
+\- **Sonraki görev:** Final UI revamp.
+
 \## 13. Karar Kaydı
 
 

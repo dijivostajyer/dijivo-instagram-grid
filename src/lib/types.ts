@@ -6,6 +6,13 @@
 
 /** Grid içinde bir hücrenin kaynağı */
 export type PostSource = "mevcut" | "planlanan";
+export type PostType = "post" | "reel" | "carousel";
+
+export interface Highlight {
+  id: string;
+  title: string;
+  imageUrl?: string;
+}
 
 export interface Brand {
   /** Kısa benzersiz tanımlayıcı (slug) */
@@ -18,6 +25,11 @@ export interface Brand {
   profileImageUrl?: string;
   /** Kısa açıklama (isteğe bağlı) */
   bio?: string;
+  /** Görüntülenen profil istatistikleri (isteğe bağlı). */
+  postCount?: number;
+  followersCount?: number;
+  followingCount?: number;
+  highlights?: Highlight[];
 }
 
 export interface Post {
@@ -29,6 +41,8 @@ export interface Post {
   alt?: string;
   /** Instagram 1:1 kırpmadan önceki görsel oranı */
   aspectRatio?: "1:1" | "3:4" | "4:3" | "16:9";
+  /** İçerik formatı; eski kayıtlar varsayılan olarak normal gönderidir. */
+  postType?: PostType;
 }
 
 /** Instagram'da halihazırda yayında olan gönderi */
