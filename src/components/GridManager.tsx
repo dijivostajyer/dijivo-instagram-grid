@@ -171,6 +171,15 @@ export default function GridManager() {
     showError: (message: string) => console.error("[export]", message),
   };
 
+  useEffect(() => {
+    if (!profileOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [profileOpen]);
+
   return (
     <div className="min-h-screen bg-[#f6f7f5] text-neutral-900">
       <header className="border-b border-black/5 bg-white/90">
@@ -235,18 +244,9 @@ export default function GridManager() {
         </div>
       </main>
 
-      {profileOpen ? <div className="fixed inset-0 z-50 flex justify-end bg-black/20 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Profil ayarları" onKeyDown={(event) => { if (event.key === "Escape") setProfileOpen(false); }}><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl sm:rounded-2xl"><div className="mb-6 flex items-center justify-between"><div><h2 className="text-lg font-semibold">Profil ayarları</h2><p className="mt-1 text-sm text-neutral-500">Değişiklikler otomatik kaydedilir.</p></div><button type="button" autoFocus onClick={() => setProfileOpen(false)} aria-label="Profil ayarlarını kapat" className="grid size-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100"><XMarkIcon className="size-4" /></button></div><BrandEditor brand={brand} onChange={setBrand} /></div></div> : null}
+      {profileOpen ? <div className="fixed inset-0 z-50 flex justify-end bg-black/20 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Profil ayarları"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl sm:rounded-2xl"><div className="mb-6 flex items-center justify-between"><div><h2 className="text-lg font-semibold">Profil ayarları</h2><p className="mt-1 text-sm text-neutral-500">Değişiklikler otomatik kaydedilir.</p></div><button type="button" autoFocus onClick={() => setProfileOpen(false)} aria-label="Profil ayarlarını kapat" className="grid size-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-100"><XMarkIcon className="size-4" /></button></div><BrandEditor brand={brand} onChange={setBrand} /></div></div> : null}
     </div>
   );
-
-  useEffect(() => {
-    if (!profileOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProfileOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [profileOpen]);
 }
 
 /** Planlanan gönderi yükleme formu (hata mesajlarıyla). */
