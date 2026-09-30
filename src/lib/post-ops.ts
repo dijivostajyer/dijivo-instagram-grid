@@ -88,7 +88,7 @@ export function reorderPinnedPosts(
  */
 export function addExistingPost(
   posts: ExistingPost[],
-  input: { imageUrl: string; alt?: string; recency: "enYeni" | "enEski"; postType?: PostType },
+  input: { imageUrl: string; alt?: string; recency: "enYeni" | "enEski"; postType?: PostType; aspectRatio?: ExistingPost["aspectRatio"] },
 ): { posts: ExistingPost[]; post: ExistingPost } {
   const maxRecency = posts.reduce((m, p) => Math.max(m, p.recencyIndex), -1);
   if (input.recency === "enYeni") {
@@ -99,6 +99,7 @@ export function addExistingPost(
       imageUrl: input.imageUrl,
       alt: input.alt,
       postType: input.postType ?? "post",
+      aspectRatio: input.aspectRatio,
       recencyIndex: 0,
       pinned: false,
     };
@@ -110,6 +111,7 @@ export function addExistingPost(
     imageUrl: input.imageUrl,
     alt: input.alt,
     postType: input.postType ?? "post",
+    aspectRatio: input.aspectRatio,
     recencyIndex: maxRecency + 1,
     pinned: false,
   };
@@ -130,7 +132,7 @@ export function deleteExistingPost(
 /** Yeni planlanan gönderi ekler: en yakın yayın olacak şekilde (planOrder 0). */
 export function addPlannedPost(
   posts: PlannedPost[],
-  input: { imageUrl: string; alt?: string; postType?: PostType },
+  input: { imageUrl: string; alt?: string; postType?: PostType; aspectRatio?: PlannedPost["aspectRatio"] },
 ): { posts: PlannedPost[]; post: PlannedPost } {
   const shifted = posts.map((p) => ({ ...p, planOrder: p.planOrder + 1 }));
   const post: PlannedPost = {
@@ -139,6 +141,7 @@ export function addPlannedPost(
     imageUrl: input.imageUrl,
     alt: input.alt,
     postType: input.postType ?? "post",
+    aspectRatio: input.aspectRatio,
     planOrder: 0,
   };
   return { posts: [post, ...shifted], post };

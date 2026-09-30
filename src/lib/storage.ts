@@ -150,7 +150,10 @@ export function createProjectFromState(state: Omit<PersistedAppState, "projects"
 }
 
 function isProject(value: unknown): value is GridProject {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string" || typeof value.month !== "number" || typeof value.year !== "number" || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string" || !isBrand(value.brand)) return false;
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || typeof value.name !== "string") return false;
+  const month = value.month;
+  const year = value.year;
+  if (typeof month !== "number" || !Number.isInteger(month) || month < 1 || month > 12 || typeof year !== "number" || !Number.isInteger(year) || year < 2000 || year > 2100 || typeof value.createdAt !== "string" || Number.isNaN(Date.parse(value.createdAt)) || typeof value.updatedAt !== "string" || Number.isNaN(Date.parse(value.updatedAt)) || !isBrand(value.brand)) return false;
   return parseExistingPosts(value.existingPosts) !== null && parsePlannedPosts(value.plannedPosts) !== null;
 }
 
@@ -200,6 +203,8 @@ export function deserializeAppState(
   }
   if (raw.projects === undefined) return legacyState;
   if (!Array.isArray(raw.projects) || !raw.projects.every(isProject) || typeof raw.activeProjectId !== "string") return null;
+  const ids = raw.projects.map((project) => project.id);
+  if (new Set(ids).size !== ids.length || !ids.includes(raw.activeProjectId)) return null;
   return { ...legacyState, projects: raw.projects.map((project) => ({ ...project, existingPosts: normalizePosts(project.existingPosts), plannedPosts: normalizePosts(project.plannedPosts) })), activeProjectId: raw.activeProjectId };
 }
 
@@ -270,6 +275,11 @@ export function toPersistableState(
     return url;
   };
 
+  const persistBrand = (brand: Brand): Brand => ({
+    ...brand,
+    profileImageUrl: resolveUrl(brand.profileImageUrl),
+    highlights: brand.highlights?.map((highlight) => ({ ...highlight, imageUrl: resolveUrl(highlight.imageUrl) })),
+  });
   const profileImageUrl = resolveUrl(state.brand.profileImageUrl);
 
   const existingPosts: ExistingPost[] = [];
@@ -288,10 +298,10 @@ export function toPersistableState(
 
   return {
     version: STORAGE_VERSION,
-    brand: { ...state.brand, profileImageUrl },
+    brand: { ...persistBrand(state.brand), profileImageUrl },
     existingPosts,
     plannedPosts,
-    projects: state.projects?.map((project) => ({ ...project, brand: { ...project.brand, profileImageUrl: resolveUrl(project.brand.profileImageUrl) }, existingPosts: project.existingPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is ExistingPost => post.imageUrl !== undefined), plannedPosts: project.plannedPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is PlannedPost => post.imageUrl !== undefined) })),
+    projects: state.projects?.map((project) => ({ ...project, brand: persistBrand(project.brand), existingPosts: project.existingPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is ExistingPost => post.imageUrl !== undefined), plannedPosts: project.plannedPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is PlannedPost => post.imageUrl !== undefined) })),
     activeProjectId: state.activeProjectId,
   };
 }

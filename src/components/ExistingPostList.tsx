@@ -27,6 +27,7 @@ export default function ExistingPostList({
     alt: string;
     recency: "enYeni" | "enEski";
     postType: PostType;
+    aspectRatio: "1:1" | "3:4" | "4:3" | "16:9";
   }) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string, pinned: boolean) => void;
@@ -44,8 +45,8 @@ export default function ExistingPostList({
     setError(null);
     setBusy(true);
     try {
-      const { url, alt } = await loadImageFile(file);
-      onUpload({ url, alt, recency, postType });
+      const { url, alt, aspectRatio } = await loadImageFile(file);
+      onUpload({ url, alt, recency, postType, aspectRatio });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Görsel yüklenemedi.");
     } finally {

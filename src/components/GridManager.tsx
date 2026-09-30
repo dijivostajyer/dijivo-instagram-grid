@@ -64,6 +64,7 @@ export default function GridManager() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
 
   const grid = useMemo(
     () => computeGrid(existingPosts, plannedPosts),
@@ -86,6 +87,7 @@ export default function GridManager() {
     alt: string;
     recency: "enYeni" | "enEski";
     postType: PostType;
+    aspectRatio: "1:1" | "3:4" | "4:3" | "16:9";
   }) {
     // Görsel önce IndexedDB'ye yazılır; state'e `blob:` URL girer, kalıcı
     // metaveriye `idb:` referansı girer.
@@ -95,6 +97,7 @@ export default function GridManager() {
       alt: input.alt,
       recency: input.recency,
       postType: input.postType,
+      aspectRatio: input.aspectRatio,
     });
     setExistingPosts(posts);
   }
@@ -134,10 +137,10 @@ export default function GridManager() {
     setExistingPosts((prev) => reorderPinnedPosts(prev, orderedIds));
   }
 
-  async function handlePlannedUpload(url: string, alt: string, postType: PostType) {
+  async function handlePlannedUpload(url: string, alt: string, postType: PostType, aspectRatio: "1:1" | "3:4" | "4:3" | "16:9") {
     setPlannedError(null);
     await persistUpload(url);
-    setPlannedPosts((prev) => addPlannedPost(prev, { imageUrl: url, alt, postType }).posts);
+    setPlannedPosts((prev) => addPlannedPost(prev, { imageUrl: url, alt, postType, aspectRatio }).posts);
   }
 
   function handlePlannedPostTypeChange(id: string, postType: PostType) {
@@ -234,7 +237,8 @@ export default function GridManager() {
             {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.month}/{project.year}</option>)}
           </select>
           <button type="button" onClick={() => setNewProjectOpen((open) => !open)} className="rounded-lg border border-black/10 px-2 py-1.5 text-sm font-medium hover:bg-neutral-50">Yeni ay</button>
-          {newProjectOpen ? <ProjectCreator onCreate={(name, month, year, copyPrevious) => { createProject(name, month, year, copyPrevious); setNewProjectOpen(false); }} /> : null}
+          {newProjectOpen ? <ProjectCreator onCreate={(name, month, year, copyPrevious) => { const error = createProject(name, month, year, copyPrevious); setProjectError(error); if (!error) setNewProjectOpen(false); }} /> : null}
+          {projectError ? <p role="alert" className="text-sm text-red-700">{projectError}</p> : null}
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
@@ -277,7 +281,7 @@ export default function GridManager() {
 function PlannedUpload({
   onUpload,
 }: {
-  onUpload: (url: string, alt: string, postType: PostType) => Promise<void>;
+  onUpload: (url: string, alt: string, postType: PostType, aspectRatio: "1:1" | "3:4" | "4:3" | "16:9") => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -291,8 +295,8 @@ function PlannedUpload({
     const failures: string[] = [];
     for (const file of Array.from(files)) {
       try {
-        const { url, alt } = await loadImageFile(file);
-        await onUpload(url, alt, postType);
+        const { url, alt, aspectRatio } = await loadImageFile(file);
+        await onUpload(url, alt, postType, aspectRatio);
       } catch (e) {
         failures.push(`${file.name}: ${e instanceof Error ? e.message : "Görsel yüklenemedi."}`);
       }

@@ -411,6 +411,8 @@ Her AI, işi bırakmadan veya bir görevi tamamladıktan sonra bu bölümü gün
 \- **Gerçek riskler:** Aylık proje kopyasında görsel Blob referansları ortak kullanılır; aktif proje silinmediği sürece güvenlidir, fakat tüm projeler arası ref-count cleanup için ek regression testi gerekir. PDF sayfa içe aktarma ağır bir rasterizer dependency olmadan desteklenmez ve ertelendi.
 \- **Sonraki görev:** Final UI revamp.
 
+\- **Kritik takip güncellemesi:** `.next` temizlenip dev server yeniden başlatılınca localhost 500 hatası kayboldu ve `/` 200 döndü; kök neden stale cache/eski dev süreciydi, uygulama kodu hatası değildi. `hydrateState()` artık her projenin profil/highlight/post görsellerini çözerek aynı `idb:` ref için tek object URL eşlemesi kullanır. Lifecycle ref toplama tüm projeleri ve highlight kapaklarını kapsar; başka projede kullanılan Blob silinmez. Önceki ay kopyalama hedef ayın gerçek önceki ayını arar (Ocak→Aralık); aynı ay adaylarında `updatedAt` en yeni olan seçilir. Highlight kapakları mevcut JPG/PNG/WebP doğrulama ve IndexedDB zinciriyle eklenebilir/kaldırılabilir. Kaynak oran korunur, profil grid'i 1:1 Instagram preview olarak gösterilir. Export için 300 DPI `2480×3508` A4 assertion eklendi. Revoke endpoint capability-token modelindedir: token'ı bilen çağıran revoke edebilir; auth/owner capability henüz yoktur ve bu bilinen sınırlamadır. Son doğrulama: typecheck PASS, 104/104 test PASS. Browser automation transport kapalı kaldığından zorunlu gerçek UI smoke ve Project A/B shared-image browser senaryosu bu oturumda tamamlanamadı; final UI revamp sonraki faz olarak kalır.
+
 \## 13. Karar Kaydı
 
 

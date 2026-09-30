@@ -143,6 +143,10 @@ describe("addExistingPost — recency kontrolü", () => {
     expect(next.find((p) => p.id === "e2")?.recencyIndex).toBe(2);
   });
 
+  it("yüklenen kaynak aspect ratio metadata'sını korur", () => {
+    expect(addExistingPost([], { imageUrl: "/img/portrait.jpg", recency: "enYeni", aspectRatio: "3:4" }).post.aspectRatio).toBe("3:4");
+  });
+
   it("'enEski' seçilince en büyük recency + 1 olur", () => {
     const posts = [existing(0), existing(1)];
     const { post } = addExistingPost(posts, {
@@ -172,6 +176,10 @@ describe("planlanan gönderi işlemleri", () => {
     expect(post.planOrder).toBe(0);
     expect(next.find((p) => p.id === "p1")?.planOrder).toBe(1);
     expect(next.find((p) => p.id === "p2")?.planOrder).toBe(2);
+  });
+
+  it("planlanan çoklu yükleme girdisinin aspect ratio bilgisini korur", () => {
+    expect(addPlannedPost([], { imageUrl: "/img/square.jpg", aspectRatio: "1:1" }).post.aspectRatio).toBe("1:1");
   });
 
   it("sürükle-bırak sırası planOrder'a yansır ve grid sırası değişir", () => {
