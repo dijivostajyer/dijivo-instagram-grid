@@ -268,6 +268,127 @@ describe("restored ordering, pinned ve planned sırası", () => {
   });
 });
 
+describe("v2 → v3 çok-marka migration", () => {
+  it("v2 tek-marka kaydını brands[] altında toplar ve projelere brandId ekler", () => {
+    const project = { id: "project-1", name: "Ekim 2026", month: 10, year: 2026, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z", brand: BRAND, existingPosts: [], plannedPosts: [] };
+    const v2 = { version: 2, brand: BRAND, existingPosts: [], plannedPosts: [], projects: [project], activeProjectId: project.id };
+    const restored = deserializeAppState(JSON.stringify(v2));
+    expect(restored?.version).toBe(STORAGE_VERSION);
+    expect(restored?.brands).toEqual([BRAND]);
+    expect(restored?.activeBrandId).toBe(BRAND.id);
+    expect(restored?.projects?.[0].brandId).toBe(BRAND.id);
+    // Üst düzey veri ve projeler korunur.
+    expect(restored?.projects?.[0].id).toBe(project.id);
+  });
+
+  it("v2 kayıtta farklı markalı projeler tekilleştirilerek kayıt defterine düşer", () => {
+    const brandB: Brand = { id: "marka-2", name: "Marka 2", username: "marka2" };
+    const projectA = { id: "pa", name: "A", month: 9, year: 2026, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z", brand: BRAND, existingPosts: [], plannedPosts: [] };
+    const projectB = { id: "pb", name: "B", month: 10, year: 2026, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z", brand: brandB, existingPosts: [], plannedPosts: [] };
+    const v2 = { version: 2, brand: BRAND, existingPosts: [], plannedPosts: [], projects: [projectA, projectB], activeProjectId: "pb" };
+    const restored = deserializeAppState(JSON.stringify(v2));
+    expect(restored?.brands).toHaveLength(2);
+    expect(restored?.brands?.[0].id).toBe(BRAND.id);
+    expect(restored?.brands?.[1].id).toBe("marka-2");
+    expect(restored?.activeBrandId).toBe(BRAND.id);
+    expect(restored?.projects?.[0].brandId).toBe(BRAND.id);
+    expect(restored?.projects?.[1].brandId).toBe("marka-2");
+  });
+
+  it("v1 kaydı da brands[] altında toplanır", () => {
+    const old = { ...sampleState(), version: 1 };
+    const restored = deserializeAppState(JSON.stringify(old));
+    expect(restored?.brands).toEqual([BRAND]);
+    expect(restored?.activeBrandId).toBe(BRAND.id);
+    expect(restored?.projects?.[0].brandId).toBe(BRAND.id);
+  });
+});
+
+describe("v3 çok-marka doğrulama", () => {
+  it("brands ve activeBrandId roundtrip'te korunur", () => {
+    const brandB: Brand = { id: "marka-2", name: "Marka 2", username: "marka2" };
+    const state: PersistedAppState = {
+      version: STORAGE_VERSION,
+      brand: BRAND,
+      existingPosts: [],
+      plannedPosts: [],
+      brands: [BRAND, brandB],
+      activeBrandId: "marka-2",
+      projects: [],
+      activeProjectId: "",
+    };
+    expect(deserializeAppState(serializeAppState(state))).toEqual(state);
+  });
+
+  it("boş brands listesi (fresh/onboarding state) geçerlidir", () => {
+    const state: PersistedAppState = { ...sampleState(), brands: [], activeBrandId: "" };
+    const restored = deserializeAppState(serializeAppState(state));
+    expect(restored?.brands).toEqual([]);
+    expect(restored?.activeBrandId).toBe("");
+  });
+
+  it("boş brands listesinde dolu activeBrandId null döner", () => {
+    const json = JSON.stringify({ version: STORAGE_VERSION, brand: BRAND, existingPosts: [], plannedPosts: [], brands: [], activeBrandId: "marka-1" });
+    expect(deserializeAppState(json)).toBeNull();
+  });
+
+  it("tekrarlayan marka kimlikleri null döner", () => {
+    const json = JSON.stringify({ version: STORAGE_VERSION, brand: BRAND, existingPosts: [], plannedPosts: [], brands: [BRAND, { ...BRAND }], activeBrandId: BRAND.id });
+    expect(deserializeAppState(json)).toBeNull();
+  });
+
+  it("activeBrandId marka listesinde yoksa null döner", () => {
+    const json = JSON.stringify({ version: STORAGE_VERSION, brand: BRAND, existingPosts: [], plannedPosts: [], brands: [BRAND], activeBrandId: "eksik" });
+    expect(deserializeAppState(json)).toBeNull();
+  });
+
+  it("geçersiz marka kaydı null döner", () => {
+    const json = JSON.stringify({ version: STORAGE_VERSION, brand: BRAND, existingPosts: [], plannedPosts: [], brands: [{ ...BRAND, id: 1 }], activeBrandId: BRAND.id });
+    expect(deserializeAppState(json)).toBeNull();
+  });
+});
+
+describe("caption ve hashtag kalıcılığı", () => {
+  it("post caption, hashtag grupları, mention/CTA ve yeni marka alanları roundtrip'te korunur", () => {
+    const state = sampleState();
+    state.existingPosts[0].caption = "Caption #dijivo @dijivo";
+    state.plannedPosts[0].caption = "Planlanan açıklama";
+    const brand: Brand = {
+      ...BRAND,
+      displayName: "Görünen Ad",
+      website: "https://dijivo.com",
+      phone: "+90 555",
+      email: "merhaba@dijivo.com",
+      category: "Ajans",
+      hashtagGroups: [{ id: "hg-1", title: "Genel", tags: ["dijivo", "socialmedia"] }],
+      defaultMentions: ["@dijivo"],
+      defaultCtas: ["Detaylı bilgi için DM üzerinden bizimle iletişime geçin."],
+    };
+    state.brand = brand;
+    const restored = deserializeAppState(serializeAppState(state));
+    expect(restored?.existingPosts[0].caption).toBe("Caption #dijivo @dijivo");
+    expect(restored?.plannedPosts[0].caption).toBe("Planlanan açıklama");
+    expect(restored?.brand.displayName).toBe("Görünen Ad");
+    expect(restored?.brand.website).toBe("https://dijivo.com");
+    expect(restored?.brand.phone).toBe("+90 555");
+    expect(restored?.brand.email).toBe("merhaba@dijivo.com");
+    expect(restored?.brand.category).toBe("Ajans");
+    expect(restored?.brand.hashtagGroups).toEqual(brand.hashtagGroups);
+    expect(restored?.brand.defaultMentions).toEqual(["@dijivo"]);
+    expect(restored?.brand.defaultCtas).toHaveLength(1);
+  });
+
+  it("geçersiz hashtag grubu null döner", () => {
+    const json = JSON.stringify({
+      version: STORAGE_VERSION,
+      brand: { ...BRAND, hashtagGroups: [{ id: "hg", title: "Genel", tags: ["ok", 42] }] },
+      existingPosts: [],
+      plannedPosts: [],
+    });
+    expect(deserializeAppState(json)).toBeNull();
+  });
+});
+
 describe("toPersistableState (blob: localStorage'a girmez)", () => {
   it("idb referansını haritadan aynen korur, http URL'yi olduğu gibi yazar", () => {
     const ref = makeImageRef("abc");

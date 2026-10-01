@@ -3,11 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  SAMPLE_BRAND,
-  SAMPLE_EXISTING_POSTS,
-  SAMPLE_PLANNED_POSTS,
-} from "../data/sample-data";
-import {
   clearStoredImages,
   deleteStoredImage,
   isImageRef,
@@ -25,24 +20,29 @@ import {
   toPersistableState,
   writePersistedState,
   type PersistedAppState,
-  createProjectFromState,
   type GridProject,
   type StorageLike,
 } from "../lib/storage";
-import type { Brand, ExistingPost, PlannedPost } from "../lib/types";
-import { findPreviousMonthProject } from "../lib/project-ops";
+import type { Brand, ExistingPost, Highlight, PlannedPost } from "../lib/types";
+import {
+  copyHighlightToBrandState,
+  copyPostToProjectState,
+  createBrandState,
+  createProjectState,
+  getDefaultAppState,
+  selectBrandState,
+  selectProjectState,
+  syncActiveProject,
+} from "../lib/brand-ops";
+import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 
-/** Demo/varsayılan durum (ilk açılış ve sıfırlama sonrası). */
-export function getDefaultAppState(): PersistedAppState {
-  const base = {
-    version: STORAGE_VERSION,
-    brand: { ...SAMPLE_BRAND },
-    existingPosts: SAMPLE_EXISTING_POSTS.map((post) => ({ ...post })),
-    plannedPosts: SAMPLE_PLANNED_POSTS.map((post) => ({ ...post })),
-  };
-  const project = createProjectFromState(base);
-  return { ...base, projects: [project], activeProjectId: project.id };
-}
+/**
+ * §16/§2: tip tanımıları saf geçiş modülünde (brand-ops) yaşar;
+ * burada yeniden dışa aktarılır böylece bileşenler hook'tan
+ * ithal etmeye devam eder.
+ */
+export type { PostCopyOptions, NewBrandInput } from "../lib/brand-ops";
+export { getDefaultAppState };
 
 function getBrowserStorage(): StorageLike | null {
   try {
@@ -54,9 +54,10 @@ function getBrowserStorage(): StorageLike | null {
 }
 
 /**
- * Kayıtlı metaveriyi tarar; `idb:` görsel referanslarını object URL'e çözer ve
- * çözdüğü eşlemeyi `refByObjectUrl` haritasına yazar (geri yazarken gerekir).
- * Blob'u bulunamayan görsel/düşer: uygulama bozuk referansla çalışmaz.
+ * Kayıtlı metaveryi tarar; `idb:` görsel referanslarını object URL'e
+ * çözer ve çözdüğü eşlemeyi `refByObjectUrl` haritasına yazar (geri
+ * yazarken gerekir). Blob'u bulunamayan görsel düşer: uygulama bozuk
+ * referansla çalışmaz.
  */
 export async function hydrateState(
   state: PersistedAppState,
@@ -118,16 +119,10 @@ export async function hydrateState(
     plannedPosts,
     projects,
     activeProjectId: state.activeProjectId,
+    brands: await Promise.all((state.brands ?? []).map(hydrateBrand)),
+    activeBrandId: state.activeBrandId,
   };
   return syncActiveProject(hydrated);
-}
-
-function syncActiveProject(state: PersistedAppState): PersistedAppState {
-  if (!state.projects?.length || !state.activeProjectId) return state;
-  return {
-    ...state,
-    projects: state.projects.map((project) => project.id === state.activeProjectId ? { ...project, brand: state.brand, existingPosts: state.existingPosts, plannedPosts: state.plannedPosts, updatedAt: new Date().toISOString() } : project),
-  };
 }
 
 export interface PersistedGrid {
@@ -136,25 +131,49 @@ export interface PersistedGrid {
   plannedPosts: PlannedPost[];
   /** Açılışta kayıtlı veri yüklenene kadar `false`. */
   ready: boolean;
+  /** Marka kayıt defteri (tüm markalar). */
+  brands: Brand[];
+  /** Aktif marka kimliği; boşsa henüz marka yoktur (onboarding). */
+  activeBrandId: string;
+  /** Marka oluşturur, aktif yapar ve ilk aylık projeyi açar. */
+  createBrand: (input: NewBrandInput) => Brand | null;
+  /** Aktif markayı değiştirir; o markanın en son projesi seçilir. */
+  selectBrand: (id: string) => void;
   setBrand: (next: Brand) => void;
   setExistingPosts: (next: ExistingPost[] | ((prev: ExistingPost[]) => ExistingPost[])) => void;
   setPlannedPosts: (next: PlannedPost[] | ((prev: PlannedPost[]) => PlannedPost[])) => void;
   /** Object URL'i IndexedDB'ye kalıcılaştırır (yükleme akışlarında çağrılır). */
   persistUpload: (objectUrl: string) => Promise<void>;
-  /** Kalıcı veriyi siler ve demo varsayılanlarına döner. */
+  /** Kalıcı veriyi siler ve temiz workspace'a (onboarding) döner. */
   resetToDefaults: () => Promise<void>;
+  /** Aktif markaya ait projeler (sıkı marka izolasyonu, §5). */
   projects: GridProject[];
+  /** Tüm markaların projeleri (çapraz proje/marka kopyalama picker'ı için). */
+  allProjects: GridProject[];
+  /**
+   * Gönderiyi başka bir aylık plana (aynı veya başka marka)
+   * kopyalar; yeni kimlik verir, kaynağı değiştirmez (§16).
+   */
+  copyPostToProject: (postId: string, targetProjectId: string, options: PostCopyOptions) => string | null;
+  /** Öne çıkanı başka bir markaya kopyalar; yeni kimlik verir (§17). */
+  copyHighlightToBrand: (highlightId: string, targetBrandId: string) => string | null;
   activeProjectId: string;
   selectProject: (id: string) => void;
   createProject: (name: string, month: number, year: number, copyPrevious: boolean) => string | null;
 }
 
 /**
- * Kalıcı grid durumu (MVP aşama 4).
+ * Kalıcı grid durumu (çoklu marka workspace).
+ *
+ * Tüm saf durum geçişleri `lib/brand-ops.ts` içinde test edilebilir
+ * biçimde yaşar; bu hook yalnızca React durumunu/yan etkileri
+ * (kalıcılık, görsel yaşam döngüsü) bağlar.
  *
  * - Metaveri → localStorage (sürüm damgalı, doğrulanmış JSON).
  * - Yüklenen görseller → IndexedDB Blob'ları; state içinde object URL olarak
  *   görünür, yazılırken `idb:` referansına çevrilir (`toPersistableState`).
+ * - Üst düzey `brand`/`existingPosts`/`plannedPosts`, aktif projenin
+ *   aynısıdır (mirror); gerçek kaynak `projects[]` içindeki projelerdir.
  * - Kalıcılık mantığı GridManager'dan ayrıdır; bileşen yalnızca state verir.
  */
 export function usePersistedGrid(): PersistedGrid {
@@ -214,6 +233,11 @@ export function usePersistedGrid(): PersistedGrid {
     );
   }, [state, ready, uploadTick]);
 
+  const commit = useCallback((next: PersistedAppState) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   const persistUpload = useCallback(async (objectUrl: string) => {
     if (!objectUrl.startsWith("blob:")) return;
     trackedObjectUrls.current.add(objectUrl);
@@ -244,17 +268,47 @@ export function usePersistedGrid(): PersistedGrid {
         }
       }
       const previousState = stateRef.current;
-      const nextState = syncActiveProject({ ...previousState, brand: next });
-      stateRef.current = nextState;
+      // §7: marka düzenlemesi kayıt defterindeki aktif marka girişini günceller.
+      const brands = (previousState.brands ?? []).map((brand) =>
+        brand.id === previousState.activeBrandId ? next : brand,
+      );
+      const nextState = syncActiveProject({ ...previousState, brand: next, brands });
       void cleanUpRemovedImages({
         previousState,
         nextState,
         refByObjectUrl: refByObjectUrl.current,
         trackedObjectUrls: trackedObjectUrls.current,
       });
-      setState(nextState);
+      commit(nextState);
     },
-    [persistUpload],
+    [commit, persistUpload],
+  );
+
+  const createBrand = useCallback(
+    (input: NewBrandInput): Brand | null => {
+      const result = createBrandState(stateRef.current, input);
+      if (!result) return null;
+      // Onboarding'de yüklenen profil görseli kalıcılaştırılır.
+      const profileImageUrl = result.brand.profileImageUrl;
+      if (
+        profileImageUrl?.startsWith("blob:") &&
+        !refByObjectUrl.current.has(profileImageUrl)
+      ) {
+        void persistUpload(profileImageUrl);
+      }
+      commit(result.state);
+      return result.brand;
+    },
+    [commit, persistUpload],
+  );
+
+  const selectBrand = useCallback(
+    (id: string) => {
+      const next = selectBrandState(stateRef.current, id);
+      if (!next) return;
+      commit(next);
+    },
+    [commit],
   );
 
   const setExistingPosts = useCallback(
@@ -265,16 +319,15 @@ export function usePersistedGrid(): PersistedGrid {
         existingPosts:
           typeof next === "function" ? next(previousState.existingPosts) : next,
       });
-      stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
         nextState,
         refByObjectUrl: refByObjectUrl.current,
         trackedObjectUrls: trackedObjectUrls.current,
       });
-      setState(nextState);
+      commit(nextState);
     },
-    [],
+    [commit],
   );
 
   const setPlannedPosts = useCallback(
@@ -285,16 +338,15 @@ export function usePersistedGrid(): PersistedGrid {
         plannedPosts:
           typeof next === "function" ? next(previousState.plannedPosts) : next,
       });
-      stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
         nextState,
         refByObjectUrl: refByObjectUrl.current,
         trackedObjectUrls: trackedObjectUrls.current,
       });
-      setState(nextState);
+      commit(nextState);
     },
-    [],
+    [commit],
   );
 
   const resetToDefaults = useCallback(async () => {
@@ -305,56 +357,68 @@ export function usePersistedGrid(): PersistedGrid {
       trackedObjectUrls: trackedObjectUrls.current,
     });
     // Sıfırlama sonrası persist efekti varsayılanları geri yazmasın:
-    // depo, ilk açılışta olduğu gibi temiz kalmalı.
+    // depo, ilk açılışta olduğu gibi temiz kalmalı (onboarding).
     skipPersistRef.current = true;
-    const defaults = getDefaultAppState();
-    stateRef.current = defaults;
-    setState(defaults);
-  }, []);
+    commit(getDefaultAppState());
+  }, [commit]);
 
-  const selectProject = useCallback((id: string) => {
-    const current = stateRef.current;
-    const project = current.projects?.find((item) => item.id === id);
-    if (!project) return;
-    const next = { ...current, activeProjectId: id, brand: project.brand, existingPosts: project.existingPosts, plannedPosts: project.plannedPosts };
-    stateRef.current = next;
-    setState(next);
-  }, []);
+  const selectProject = useCallback(
+    (id: string) => {
+      const next = selectProjectState(stateRef.current, id);
+      if (!next) return;
+      commit(next);
+    },
+    [commit],
+  );
 
   const createProject = useCallback((name: string, month: number, year: number, copyPrevious: boolean): string | null => {
-    const current = syncActiveProject(stateRef.current);
-    const previous = copyPrevious ? findPreviousMonthProject(current.projects ?? [], month, year) : null;
-    if (copyPrevious && !previous) return "Önceki aya ait kopyalanacak proje bulunamadı.";
-    const source = previous ? { brand: previous.brand, existingPosts: previous.existingPosts, plannedPosts: previous.plannedPosts } : { brand: { ...current.brand, profileImageUrl: undefined }, existingPosts: [], plannedPosts: [] };
-    const timestamp = new Date().toISOString();
-    const project: GridProject = {
-      id: `project-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-      name: name.trim() || `${month}/${year}`,
-      month,
-      year,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      brand: { ...source.brand, highlights: source.brand.highlights?.map((highlight) => ({ ...highlight, id: `highlight-${timestamp}-${highlight.id}` })) },
-      existingPosts: source.existingPosts.map((post) => ({ ...post, id: `existing-${timestamp}-${post.id}` })),
-      plannedPosts: source.plannedPosts.map((post) => ({ ...post, id: `planned-${timestamp}-${post.id}` })),
-    };
-    const next = { ...current, activeProjectId: project.id, brand: project.brand, existingPosts: project.existingPosts, plannedPosts: project.plannedPosts, projects: [...(current.projects ?? []), project] };
-    stateRef.current = next;
-    setState(next);
+    const result = createProjectState(stateRef.current, name, month, year, copyPrevious);
+    if ("error" in result) return result.error;
+    commit(result.state);
     return null;
-  }, []);
+  }, [commit]);
+
+  const copyPostToProject = useCallback(
+    (postId: string, targetProjectId: string, options: PostCopyOptions): string | null => {
+      const result = copyPostToProjectState(stateRef.current, postId, targetProjectId, options);
+      if ("error" in result) return result.error;
+      commit(result.state);
+      return null;
+    },
+    [commit],
+  );
+
+  const copyHighlightToBrand = useCallback(
+    (highlightId: string, targetBrandId: string): string | null => {
+      const result = copyHighlightToBrandState(stateRef.current, highlightId, targetBrandId);
+      if ("error" in result) return result.error;
+      commit(result.state);
+      return null;
+    },
+    [commit],
+  );
 
   return {
     brand: state.brand,
     existingPosts: state.existingPosts,
     plannedPosts: state.plannedPosts,
     ready,
+    brands: state.brands ?? [],
+    activeBrandId: state.activeBrandId ?? "",
+    createBrand,
+    selectBrand,
     setBrand,
     setExistingPosts,
     setPlannedPosts,
     persistUpload,
     resetToDefaults,
-    projects: state.projects ?? [],
+    projects: (state.projects ?? []).filter(
+      (project) =>
+        !state.activeBrandId || !project.brandId || project.brandId === state.activeBrandId,
+    ),
+    allProjects: state.projects ?? [],
+    copyPostToProject,
+    copyHighlightToBrand,
     activeProjectId: state.activeProjectId ?? "",
     selectProject,
     createProject,

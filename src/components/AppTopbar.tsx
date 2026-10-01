@@ -1,22 +1,33 @@
 "use client";
 
-import { Bars3Icon, CheckIcon } from "@heroicons/react/16/solid";
+import { Bars3Icon, CheckIcon, PlusIcon } from "@heroicons/react/16/solid";
 
 import type { GridProject } from "@/lib/storage";
+import type { Brand } from "@/lib/types";
 import { VIEW_TITLES, type AppView } from "./AppSidebar";
 
 /**
- * Üst bar: sayfa başlığı, "kaydedildi" göstergesi ve her ekranda erişilebilir
- * aylık proje seçici (proje seçimi artık geçici bir satır değil, kalıcı kontrol).
+ * Üst bar: sayfa başlığı, "kaydedildi" göstergesi ve iki seviyeli
+ * Marka + Aylık Plan seçici (§5). Plan seçici yalnızca aktif
+ * markaya ait projeleri listeler; '+ Yeni Marka' yeni giriş
+ * gerektirmeden mevcut workspace'a marka ekler (§3).
  */
 export default function AppTopbar({
   view,
+  brands,
+  activeBrandId,
+  onSelectBrand,
+  onNewBrand,
   projects,
   activeProjectId,
   onSelectProject,
   onOpenSidebar,
 }: {
   view: AppView;
+  brands: Brand[];
+  activeBrandId: string;
+  onSelectBrand: (id: string) => void;
+  onNewBrand: () => void;
   projects: GridProject[];
   activeProjectId: string;
   onSelectProject: (id: string) => void;
@@ -24,7 +35,7 @@ export default function AppTopbar({
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
+      <div className="flex min-h-14 flex-wrap items-center gap-x-2 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:gap-x-3 sm:py-0 sm:px-6">
         <button
           type="button"
           aria-label="Menüyü aç"
@@ -47,17 +58,37 @@ export default function AppTopbar({
 
         <div className="flex shrink-0 items-center gap-2">
           <label
-            htmlFor="project-select"
-            className="hidden text-sm text-neutral-500 sm:inline"
+            htmlFor="brand-select"
+            className="hidden text-sm text-neutral-500 xl:inline"
           >
-            Aylık proje
+            Marka
+          </label>
+          <select
+            id="brand-select"
+            value={activeBrandId}
+            onChange={(event) => onSelectBrand(event.target.value)}
+            aria-label="Marka"
+            className="h-9 max-w-[7rem] rounded-lg border border-slate-200 bg-white px-2 text-sm text-neutral-900 outline-none focus:border-sky-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-600 sm:max-w-[10rem]"
+          >
+            {brands.map((brand) => (
+              <option key={brand.id} value={brand.id}>
+                {brand.name}
+              </option>
+            ))}
+          </select>
+
+          <label
+            htmlFor="project-select"
+            className="hidden text-sm text-neutral-500 xl:inline"
+          >
+            Plan
           </label>
           <select
             id="project-select"
             value={activeProjectId}
             onChange={(event) => onSelectProject(event.target.value)}
-            aria-label="Aylık proje"
-            className="h-9 max-w-[9rem] rounded-lg border border-slate-200 bg-white px-2 text-sm text-neutral-900 outline-none focus:border-sky-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-600 sm:max-w-[14rem]"
+            aria-label="Aylık plan"
+            className="h-9 max-w-[8rem] rounded-lg border border-slate-200 bg-white px-2 text-sm text-neutral-900 outline-none focus:border-sky-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-600 sm:max-w-[12rem]"
           >
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
@@ -65,6 +96,15 @@ export default function AppTopbar({
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            onClick={onNewBrand}
+            className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+          >
+            <PlusIcon className="size-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Yeni Marka</span>
+          </button>
         </div>
       </div>
     </header>

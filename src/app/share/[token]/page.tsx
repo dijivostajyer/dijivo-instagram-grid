@@ -20,12 +20,10 @@ export default async function SharePage({
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-neutral-500">
           Salt-okunur grid paylaşımı
         </p>
-        <div className="rounded-lg border border-neutral-200 p-4">
-          <GridPreview
-            brand={{ id: "shared-brand", ...snapshot.brand }}
-            result={gridResultFromSnapshot(snapshot.cells)}
-          />
-        </div>
+        <GridPreview
+          brand={{ id: "shared-brand", ...snapshot.brand }}
+          result={gridResultFromSnapshot(snapshot.cells)}
+        />
       </main>
     );
   } catch (error) {

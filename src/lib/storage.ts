@@ -14,7 +14,7 @@ import type { Brand, ExistingPost, PlannedPost, PostType } from "./types";
  */
 
 /** Depolama şeması sürümü; artırıldığında eski veri bilinçli olarak reddedilir. */
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
 
 /** localStorage anahtarı. */
 export const STORAGE_KEY = "dijivo-grid-state";
@@ -35,6 +35,12 @@ export interface PersistedAppState {
   /** v2: birden çok takvim projesi. Eski kayıtlar açılışta tek projeye taşınır. */
   projects?: GridProject[];
   activeProjectId?: string;
+  /**
+   * v3: çok markalı workspace kayıt defteri. v2 kayıtları açılışta
+   * otomatik olarak burada toplanır (veri kaybı yok).
+   */
+  brands?: Brand[];
+  activeBrandId?: string;
 }
 
 export interface GridProject {
@@ -45,6 +51,8 @@ export interface GridProject {
   createdAt: string;
   updatedAt: string;
   brand: Brand;
+  /** v3: bu projenin ait olduğu marka (brands[] içindeki id). */
+  brandId?: string;
   existingPosts: ExistingPost[];
   plannedPosts: PlannedPost[];
 }
@@ -55,6 +63,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
+}
+
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isHashtagGroup(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    isStringArray(value.tags)
+  );
 }
 
 function isAspectRatio(value: unknown): boolean {
@@ -77,12 +98,20 @@ function isBrand(value: unknown): value is Brand {
     typeof value.id === "string" &&
     typeof value.name === "string" &&
     typeof value.username === "string" &&
+    isOptionalString(value.displayName) &&
     isOptionalString(value.profileImageUrl) &&
-    isOptionalString(value.bio)
+    isOptionalString(value.bio) &&
+    isOptionalString(value.website) &&
+    isOptionalString(value.phone) &&
+    isOptionalString(value.email) &&
+    isOptionalString(value.category)
     && (value.postCount === undefined || typeof value.postCount === "number")
     && (value.followersCount === undefined || typeof value.followersCount === "number")
     && (value.followingCount === undefined || typeof value.followingCount === "number")
     && (value.highlights === undefined || (Array.isArray(value.highlights) && value.highlights.every((highlight) => isRecord(highlight) && typeof highlight.id === "string" && typeof highlight.title === "string" && isOptionalString(highlight.imageUrl))))
+    && (value.hashtagGroups === undefined || (Array.isArray(value.hashtagGroups) && value.hashtagGroups.every(isHashtagGroup)))
+    && (value.defaultMentions === undefined || isStringArray(value.defaultMentions))
+    && (value.defaultCtas === undefined || isStringArray(value.defaultCtas))
   );
 }
 
@@ -95,6 +124,7 @@ function isExistingPost(value: unknown): value is ExistingPost {
     isOptionalString(value.alt) &&
     isAspectRatio(value.aspectRatio) &&
     isPostType(value.postType) &&
+    isOptionalString(value.caption) &&
     typeof value.recencyIndex === "number" &&
     typeof value.pinned === "boolean" &&
     (value.pinnedOrder === undefined || typeof value.pinnedOrder === "number")
@@ -110,6 +140,7 @@ function isPlannedPost(value: unknown): value is PlannedPost {
     isOptionalString(value.alt) &&
     isAspectRatio(value.aspectRatio) &&
     isPostType(value.postType) &&
+    isOptionalString(value.caption) &&
     typeof value.planOrder === "number"
   );
 }
@@ -166,6 +197,8 @@ export function serializeAppState(state: PersistedAppState): string {
     plannedPosts: state.plannedPosts,
     projects: state.projects,
     activeProjectId: state.activeProjectId,
+    brands: state.brands,
+    activeBrandId: state.activeBrandId,
   });
 }
 
@@ -185,7 +218,7 @@ export function deserializeAppState(
     return null;
   }
   if (!isRecord(raw)) return null;
-  if (raw.version !== 1 && raw.version !== STORAGE_VERSION) return null;
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== STORAGE_VERSION) return null;
   if (!isBrand(raw.brand)) return null;
   const existingPosts = parseExistingPosts(raw.existingPosts);
   if (!existingPosts) return null;
@@ -197,15 +230,73 @@ export function deserializeAppState(
     existingPosts,
     plannedPosts,
   };
+
+  // Projeleri çöz: v1 tek projeye taşınır; v2/v3 doğrulandıktan sonra korunur.
+  let projects: GridProject[] | undefined;
+  let activeProjectId: string | undefined;
   if (raw.version === 1) {
     const project = createProjectFromState(legacyState, new Date(0));
-    return { ...legacyState, projects: [project], activeProjectId: project.id };
+    projects = [project];
+    activeProjectId = project.id;
+  } else if (raw.projects !== undefined) {
+    if (!Array.isArray(raw.projects) || typeof raw.activeProjectId !== "string") return null;
+    if (!raw.projects.every(isProject)) return null;
+    const ids = raw.projects.map((project) => project.id);
+    if (new Set(ids).size !== ids.length) return null;
+    if (raw.activeProjectId !== "" && !ids.includes(raw.activeProjectId)) return null;
+    projects = raw.projects.map((project) => ({ ...project, existingPosts: normalizePosts(project.existingPosts), plannedPosts: normalizePosts(project.plannedPosts) }));
+    activeProjectId = raw.activeProjectId;
   }
-  if (raw.projects === undefined) return legacyState;
-  if (!Array.isArray(raw.projects) || !raw.projects.every(isProject) || typeof raw.activeProjectId !== "string") return null;
-  const ids = raw.projects.map((project) => project.id);
-  if (new Set(ids).size !== ids.length || !ids.includes(raw.activeProjectId)) return null;
-  return { ...legacyState, projects: raw.projects.map((project) => ({ ...project, existingPosts: normalizePosts(project.existingPosts), plannedPosts: normalizePosts(project.plannedPosts) })), activeProjectId: raw.activeProjectId };
+
+  // v3 marka katmanı.
+  if (raw.brands === undefined) {
+    // v1/v2 kaydı: eski tek-marka verisi, brands[] altında toplanır (veri kaybı yok).
+    if (raw.version === 1 || raw.version === 2) {
+      const brands = collectBrands(legacyState.brand, projects);
+      const activeBrandId = legacyState.brand.id;
+      return {
+        ...legacyState,
+        projects: projects?.map((project) => ({ ...project, brandId: brandIdFor(project.brand, brands) })),
+        activeProjectId,
+        brands,
+        activeBrandId,
+      };
+    }
+    // v3 markasız kayıt: aynen korunur (brandless roundtrip).
+    return { ...legacyState, projects, activeProjectId };
+  }
+
+  // v3 çok-marka kayıt: brands[] ve activeBrandId doğrulanır.
+  if (!Array.isArray(raw.brands)) return null;
+  if (raw.brands.length === 0) {
+    if (raw.activeBrandId !== undefined && raw.activeBrandId !== "") return null;
+    return { ...legacyState, projects, activeProjectId, brands: [], activeBrandId: "" };
+  }
+  if (!raw.brands.every(isBrand)) return null;
+  const brandIds = raw.brands.map((brand) => brand.id);
+  if (new Set(brandIds).size !== brandIds.length) return null;
+  if (typeof raw.activeBrandId !== "string" || !brandIds.includes(raw.activeBrandId)) return null;
+  return { ...legacyState, projects, activeProjectId, brands: raw.brands as Brand[], activeBrandId: raw.activeBrandId };
+}
+
+/**
+ * v2→v3 migration yardımcısı: üst düzey marka ve projelerin marka
+ * ekranlarını tekrar etmeyerek tek bir kayıt defteri oluşturur.
+ */
+function collectBrands(topLevel: Brand, projects: GridProject[] | undefined): Brand[] {
+  const brands: Brand[] = [topLevel];
+  const seen = new Set<string>([topLevel.id]);
+  for (const project of projects ?? []) {
+    if (!seen.has(project.brand.id)) {
+      seen.add(project.brand.id);
+      brands.push(project.brand);
+    }
+  }
+  return brands;
+}
+
+function brandIdFor(brand: Brand, brands: Brand[]): string {
+  return brands.some((candidate) => candidate.id === brand.id) ? brand.id : brands[0].id;
 }
 
 /** localStorage'dan durumu okur; her türlü hatada `null` döner. */
@@ -303,5 +394,7 @@ export function toPersistableState(
     plannedPosts,
     projects: state.projects?.map((project) => ({ ...project, brand: persistBrand(project.brand), existingPosts: project.existingPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is ExistingPost => post.imageUrl !== undefined), plannedPosts: project.plannedPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is PlannedPost => post.imageUrl !== undefined) })),
     activeProjectId: state.activeProjectId,
+    brands: state.brands?.map(persistBrand),
+    activeBrandId: state.activeBrandId,
   };
 }

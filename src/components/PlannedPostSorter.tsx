@@ -24,10 +24,12 @@ function SortablePlannedItem({
   post,
   onDelete,
   onPostTypeChange,
+  onSelect,
 }: {
   post: PlannedPost;
   onDelete: (id: string) => void;
   onPostTypeChange: (id: string, type: PostType) => void;
+  onSelect: (id: string) => void;
 }) {
   const {
     attributes,
@@ -64,15 +66,22 @@ function SortablePlannedItem({
       >
         <span aria-hidden="true">⠿</span>
       </button>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={post.imageUrl}
-        alt=""
-        className="h-14 w-14 shrink-0 rounded-lg object-cover outline-1 -outline-offset-1 outline-black/5"
-      />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-700">
-        {post.alt ?? post.id}
-      </span>
+      <button
+        type="button"
+        onClick={() => onSelect(post.id)}
+        aria-label={`Düzenle: ${post.alt ?? post.id}`}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={post.imageUrl}
+          alt=""
+          className="h-14 w-14 shrink-0 rounded-lg object-cover outline-1 -outline-offset-1 outline-black/5"
+        />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-700">
+          {post.alt ?? post.id}
+        </span>
+      </button>
       <select aria-label={`${post.alt ?? post.id} içerik türü`} value={post.postType ?? "post"} onChange={(event) => onPostTypeChange(post.id, event.target.value as PostType)} className="rounded border border-black/10 bg-white px-1 py-1 text-xs">
         <option value="post">Post</option><option value="reel">Reel</option><option value="carousel">Carousel</option>
       </select>
@@ -97,11 +106,13 @@ export default function PlannedPostSorter({
   onReorder,
   onDelete,
   onPostTypeChange,
+  onSelect,
 }: {
   posts: PlannedPost[];
   onReorder: (orderedIds: string[]) => void;
   onDelete: (id: string) => void;
   onPostTypeChange: (id: string, type: PostType) => void;
+  onSelect: (id: string) => void;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -131,7 +142,7 @@ export default function PlannedPostSorter({
       >
         <ul className="flex flex-col gap-2">
           {posts.map((post) => (
-            <SortablePlannedItem key={post.id} post={post} onDelete={onDelete} onPostTypeChange={onPostTypeChange} />
+            <SortablePlannedItem key={post.id} post={post} onDelete={onDelete} onPostTypeChange={onPostTypeChange} onSelect={onSelect} />
           ))}
         </ul>
       </SortableContext>

@@ -10,19 +10,28 @@ import type { Brand } from "@/lib/types";
 export default function BrandProfilePage({
   brand,
   onChange,
+  brands,
+  onCopyHighlight,
 }: {
   brand: Brand;
   onChange: (next: Brand) => void;
+  /** §17: öne çıkan kopyalamak için marka kayıt defteri. */
+  brands: Brand[];
+  onCopyHighlight: (highlightId: string, targetBrandId: string) => string | null;
 }) {
   return (
     <div className="mx-auto max-w-[760px]">
       <p className="mb-6 text-sm text-neutral-500">
-        Profil fotoğrafı, marka bilgileri, istatistikler ve öne çıkanlar. Değişiklikler
-        otomatik olarak tarayıcınıza kaydedilir.
+        Profil fotoğrafı, marka bilgileri, içerik ayarları, hashtag grupları,
+        istatistikler ve öne çıkanlar. Değişiklikler otomatik olarak
+        tarayıcınıza kaydedilir.
       </p>
-      <div className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6">
-        <BrandEditor brand={brand} onChange={onChange} />
-      </div>
+      <BrandEditor
+        brand={brand}
+        onChange={onChange}
+        brands={brands}
+        onCopyHighlight={onCopyHighlight}
+      />
     </div>
   );
 }

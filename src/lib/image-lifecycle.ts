@@ -13,6 +13,7 @@ function imageUrls(state: PersistedAppState): string[] {
   ];
   return [
     ...collect(state.brand, state.existingPosts, state.plannedPosts),
+    ...(state.brands ?? []).flatMap((brand) => collect(brand, [], [])),
     ...(state.projects ?? []).flatMap((project) => collect(project.brand, project.existingPosts, project.plannedPosts)),
   ].filter((url): url is string => typeof url === "string");
 }

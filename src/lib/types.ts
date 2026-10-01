@@ -14,6 +14,15 @@ export interface Highlight {
   imageUrl?: string;
 }
 
+/** Marka bazlı hashtag grubu: caption'a tek tıkla eklenir. */
+export interface HashtagGroup {
+  id: string;
+  /** Grup başlığı (örn. "Genel", "Kampanya") */
+  title: string;
+  /** # işaretli etiketler (boşlukla ayrılmış tek string de olabilir) */
+  tags: string[];
+}
+
 export interface Brand {
   /** Kısa benzersiz tanımlayıcı (slug) */
   id: string;
@@ -21,15 +30,29 @@ export interface Brand {
   name: string;
   /** Instagram kullanıcı adı (@ işareti olmadan) */
   username: string;
+  /** Instagram'da görüntülenen görünen ad (isteğe bağlı; yoksa name kullanılır) */
+  displayName?: string;
   /** Profil görselinin URL'si (isteğe bağlı) */
   profileImageUrl?: string;
   /** Kısa açıklama (isteğe bağlı) */
   bio?: string;
+  /** Profil web sitesi (isteğe bağlı) */
+  website?: string;
+  /** Ajans iletişim alanları (isteğe bağlı) */
+  phone?: string;
+  email?: string;
+  category?: string;
   /** Görüntülenen profil istatistikleri (isteğe bağlı). */
   postCount?: number;
   followersCount?: number;
   followingCount?: number;
   highlights?: Highlight[];
+  /** Marka bazlı hashtag grupları (isteğe bağlı) */
+  hashtagGroups?: HashtagGroup[];
+  /** Hazır @mention'lar (isteğe bağlı) */
+  defaultMentions?: string[];
+  /** Hazır CTA şablonları (isteğe bağlı) */
+  defaultCtas?: string[];
 }
 
 export interface Post {
@@ -43,6 +66,8 @@ export interface Post {
   aspectRatio?: "1:1" | "3:4" | "4:3" | "16:9";
   /** İçerik formatı; eski kayıtlar varsayılan olarak normal gönderidir. */
   postType?: PostType;
+  /** Gönderi açıklaması (caption); hashtag/mention içerebilir. */
+  caption?: string;
 }
 
 /** Instagram'da halihazırda yayında olan gönderi */
