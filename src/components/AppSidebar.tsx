@@ -5,6 +5,7 @@ import {
   CalendarDaysIcon,
   Cog6ToothIcon,
   HomeIcon,
+  IdentificationIcon,
   ShareIcon,
   Squares2X2Icon,
   UserCircleIcon,
@@ -12,6 +13,7 @@ import {
 
 /** Uygulama içi görünüm kimliği. Yeni route açılmaz; navigasyon state'tedir. */
 export type AppView =
+  | "brands"
   | "overview"
   | "plans"
   | "planner"
@@ -25,6 +27,7 @@ const NAV_ITEMS: Array<{
   label: string;
   icon: typeof HomeIcon;
 }> = [
+  { view: "brands", label: "Markalar", icon: IdentificationIcon },
   { view: "overview", label: "Genel Bakış", icon: HomeIcon },
   { view: "plans", label: "Aylık Planlar", icon: CalendarDaysIcon },
   { view: "planner", label: "Grid Planner", icon: Squares2X2Icon },
@@ -35,6 +38,7 @@ const NAV_ITEMS: Array<{
 ];
 
 export const VIEW_TITLES: Record<AppView, string> = {
+  brands: "Markalar",
   overview: "Genel Bakış",
   plans: "Aylık Planlar",
   planner: "Grid Planner",

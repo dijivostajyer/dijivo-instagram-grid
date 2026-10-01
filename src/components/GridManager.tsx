@@ -5,6 +5,8 @@ import { PhotoIcon, XMarkIcon } from "@heroicons/react/16/solid";
 
 import AppSidebar, { type AppView } from "@/components/AppSidebar";
 import AppTopbar from "@/components/AppTopbar";
+import BrandEditor from "@/components/BrandEditor";
+import BrandHub from "@/components/BrandHub";
 import BrandProfilePage from "@/components/BrandProfilePage";
 import BulkCopyDialog from "@/components/BulkCopyDialog";
 import DashboardOverview from "@/components/DashboardOverview";
@@ -23,6 +25,7 @@ import {
   usePersistedGrid,
   type PostCopyOptions,
 } from "@/hooks/use-persisted-grid";
+import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import { monthLabel } from "@/lib/project-ops";
 import { type TypeFilter } from "@/lib/plan-stats";
@@ -39,7 +42,7 @@ import {
   unpinPost,
 } from "@/lib/post-ops";
 import { loadImageFile } from "@/lib/validators";
-import type { PostType } from "@/lib/types";
+import type { Brand, PostType } from "@/lib/types";
 
 const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabitlemek için önce pinned gönderilerden birinin sabitliğini kaldırın.`;
 
@@ -64,6 +67,7 @@ export default function GridManager() {
     createBrand,
     selectBrand,
     setBrand,
+    updateBrand,
     setExistingPosts,
     setPlannedPosts,
     persistUpload,
@@ -84,6 +88,9 @@ export default function GridManager() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [newBrandOpen, setNewBrandOpen] = useState(false);
+  // §8: marka kartındaki "Profili Düzenle" hedefi;
+  // düzenleme sırasında aktif bağlam değişmez (§11).
+  const [editBrand, setEditBrand] = useState<Brand | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
@@ -313,6 +320,19 @@ export default function GridManager() {
     setSelectionMode(false);
   }, [activeProjectId]);
 
+  // §1/§15: açılışta 2+ marka varsa hiçbir dashboard'a
+  // otomatik girilmez; önce Marka Seçimi gösterilir.
+  // Karar her açılışta (F5 dahil) yalnızca bir kez
+  // alınır; 0 marka → onboarding, 1 marka → dashboard.
+  const launchDecidedRef = useRef(false);
+  useEffect(() => {
+    if (!ready || launchDecidedRef.current) return;
+    launchDecidedRef.current = true;
+    if (resolveLaunchTarget(brands.length) === "brand-selection") {
+      setView("brands");
+    }
+  }, [ready, brands.length]);
+
   function navigate(next: AppView) {
     setView(next);
     setSidebarOpen(false);
@@ -322,6 +342,16 @@ export default function GridManager() {
     selectProject(id);
     setSelectedPostId(null);
     setView("planner");
+  }
+
+  // §4: "Markayı Aç" — aktif markayı seçer; hook aynı
+  // zamanda o markanın en son güncellenmiş planını
+  // seçer (başka markanın projesi asla seçilmez) ve
+  // dashboard'a geçilir.
+  function handleOpenBrand(id: string) {
+    selectBrand(id);
+    setSelectedPostId(null);
+    setView("overview");
   }
 
   // §2/§22: kayıtlı veri yüklenene kadar bekleme; henüz marka yoksa
@@ -364,6 +394,17 @@ export default function GridManager() {
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
+            {view === "brands" ? (
+              <BrandHub
+                brands={brands}
+                projects={allProjects}
+                activeBrandId={activeBrandId}
+                onOpenBrand={handleOpenBrand}
+                onNewBrand={() => setNewBrandOpen(true)}
+                onEditProfile={setEditBrand}
+              />
+            ) : null}
+
             {view === "overview" ? (
               <DashboardOverview
                 brand={brand}
@@ -697,12 +738,67 @@ export default function GridManager() {
         />
       ) : null}
 
-      {/* §3: '+ Yeni Marka' diyalogu */}
+      {/* §3/§7: '+ Yeni Marka' diyalogu. Marka Seçim
+          ekranından açıldıysa yeni marka otomatik
+          aktif olur ve onun dashboard'una geçilir. */}
       {newBrandOpen ? (
         <NewBrandModal
           onClose={() => setNewBrandOpen(false)}
-          onCreate={createBrand}
+          onCreate={(input) => {
+            const created = createBrand(input);
+            if (created && view === "brands") {
+              setSelectedPostId(null);
+              setView("overview");
+            }
+            return created;
+          }}
         />
+      ) : null}
+
+      {/* §8/§11: "Profili Düzenle" — ilgili markanın
+          profilini, aktif bağlamı değiştirmeden düzenler.
+          Değişiklikler anında kaydedilir (canlı brand). */}
+      {editBrand ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Profili düzenle"
+        >
+          <div
+            className="fixed inset-0 bg-black/40"
+            onClick={() => setEditBrand(null)}
+            aria-hidden="true"
+          />
+          <div className="relative my-8 w-full max-w-3xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 px-6 pt-6">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-neutral-900">
+                  Profili düzenle
+                </h2>
+                <p className="mt-0.5 truncate text-sm text-neutral-500">
+                  {editBrand.name} · @{editBrand.username}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditBrand(null)}
+                aria-label="Kapat"
+                className="grid size-9 shrink-0 place-items-center rounded-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+              >
+                <XMarkIcon className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-6 pb-6 pt-2">
+              <BrandEditor
+                brand={brands.find((item) => item.id === editBrand.id) ?? editBrand}
+                onChange={(next) => updateBrand(editBrand.id, next)}
+                brands={brands}
+                onCopyHighlight={copyHighlightToBrand}
+              />
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {sidebarOpen ? (

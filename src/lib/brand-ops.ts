@@ -213,6 +213,99 @@ export function selectProjectState(
 }
 
 /**
+ * Uygulama açılış hedefi (§1/§15): 0 marka → onboarding,
+ * 1 marka → doğrudan dashboard, 2+ marka → marka seçim
+ * ekranı. Kullanıcı her açılışta seçim yapar; son kullanılan
+ * markaya otomatik atlama yok.
+ */
+export type LaunchTarget = "onboarding" | "dashboard" | "brand-selection";
+
+export function resolveLaunchTarget(brandCount: number): LaunchTarget {
+  if (brandCount === 0) return "onboarding";
+  if (brandCount === 1) return "dashboard";
+  return "brand-selection";
+}
+
+/** Marka kartında gösterilen, state'ten hesaplanan gerçek bilgiler. */
+export interface BrandCardStats {
+  /** Markaya ait aylık plan sayısı. */
+  projectCount: number;
+  /** En son güncellenen (aktif) aylık plan; yoksa null. */
+  latestProject: GridProject | null;
+  /** Aktif plandaki toplam içerik sayısı (mevcut + planlanan). */
+  contentCount: number;
+  /** Son güncelleme zaman damgası (ISO); yoksa null. */
+  lastUpdatedAt: string | null;
+}
+
+/**
+ * Marka kartı istatistikleri (§3): yalnızca ilgili markanın
+ * projeleri kullanılır; başka markanın verisi asla karışmaz.
+ * En son güncellenen proje "aktif plan" olarak gösterilir.
+ */
+export function computeBrandCardStats(
+  brandId: string,
+  projects: GridProject[],
+): BrandCardStats {
+  const own = (projects ?? [])
+    .filter((project) => project.brandId === brandId)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const latestProject = own[0] ?? null;
+  return {
+    projectCount: own.length,
+    latestProject,
+    contentCount: latestProject
+      ? latestProject.existingPosts.length + latestProject.plannedPosts.length
+      : 0,
+    lastUpdatedAt: latestProject?.updatedAt ?? null,
+  };
+}
+
+/**
+ * "Son güncelleme" gösterge metni (§3): aynı gün → "Bugün",
+ * dün → "Dün", bu hafta → "N gün önce", daha eskisi →
+ * tarihler (tr-TR).
+ */
+export function formatBrandActivity(iso: string, now = new Date()): string {
+  const then = new Date(iso);
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((startOfDay(now) - startOfDay(then)) / 86_400_000);
+  if (days <= 0) return "Bugün";
+  if (days === 1) return "Dün";
+  if (days < 7) return `${days} gün önce`;
+  return then.toLocaleDateString("tr-TR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/**
+ * İstenen markanın profilini, aktif marka bağlamını değiştirmeden
+ * günceller (§8/§11: Marka Seçim ekranında `activeBrandId` yalnızca
+ * "Markayı Aç" aksiyonunda değişir). Aktif marka düzenleniyorsa
+ * üst düzey ayna da senkronize edilir.
+ */
+export function updateBrandState(
+  current: PersistedAppState,
+  id: string,
+  next: Brand,
+): PersistedAppState {
+  const nextState: PersistedAppState = {
+    ...current,
+    brands: (current.brands ?? []).map((brand) =>
+      brand.id === id ? next : brand,
+    ),
+    projects: (current.projects ?? []).map((project) =>
+      project.brandId === id ? { ...project, brand: next } : project,
+    ),
+  };
+  if (current.activeBrandId !== id) return nextState;
+  return syncActiveProject({ ...nextState, brand: next });
+}
+
+/**
  * Aylık plan oluşturur (§4/§19). "Önceki ayı kopyala" yalnızca
  * aynı marka içinde kalır; başka marka asla otomatik kaynak
  * olarak seçilmez. Kaynak marka verisi kayıt defterinden gelir.

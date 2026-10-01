@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  computeBrandCardStats,
   copyHighlightToBrandState,
   copyPostToProjectState,
   createBrandState,
   createProjectState,
   getDefaultAppState,
+  formatBrandActivity,
+  resolveLaunchTarget,
   selectBrandState,
   selectProjectState,
   syncActiveProject,
+  updateBrandState,
   type NewBrandInput,
   type PostCopyOptions,
 } from "./brand-ops";
@@ -17,7 +21,7 @@ import {
   serializeAppState,
   type PersistedAppState,
 } from "./storage";
-import type { ExistingPost, PlannedPost } from "./types";
+import type { Brand, ExistingPost, PlannedPost } from "./types";
 
 const NOW = new Date("2026-10-01T12:00:00.000Z");
 
@@ -554,5 +558,156 @@ describe("kalıcılık turu — F5 (§21)", () => {
     expect(restoredA.existingPosts[0].imageUrl).toBe(
       "https://cdn.example.com/post-a.jpg",
     );
+  });
+});
+
+describe("uygulama açılış hedefi (§1/§15)", () => {
+  it("0 marka → onboarding", () => {
+    expect(resolveLaunchTarget(0)).toBe("onboarding");
+  });
+
+  it("1 marka → doğrudan dashboard (gereksiz ekran yok)", () => {
+    expect(resolveLaunchTarget(1)).toBe("dashboard");
+  });
+
+  it("2+ marka → marka seçim ekranı (otomatik atlama yok)", () => {
+    expect(resolveLaunchTarget(2)).toBe("brand-selection");
+    expect(resolveLaunchTarget(5)).toBe("brand-selection");
+  });
+});
+
+describe("marka kartı istatistikleri (§3)", () => {
+  function hubState() {
+    const first = createBrandState(
+      getDefaultAppState(),
+      brandInput("Dijivo", "dijivo"),
+      NOW,
+    )!;
+    const second = createBrandState(
+      first.state,
+      brandInput("X Markası", "ximarkasi"),
+      NOW,
+    )!;
+    return {
+      state: second.state,
+      dijivo: first.brand,
+      ximarkasi: second.brand,
+    };
+  }
+
+  it("yalnızca ilgili markanın projeleri sayılır (izolasyon)", () => {
+    const { state, dijivo, ximarkasi } = hubState();
+    expect(state.projects).toHaveLength(2);
+    expect(computeBrandCardStats(dijivo.id, state.projects!).projectCount).toBe(1);
+    expect(
+      computeBrandCardStats(ximarkasi.id, state.projects!).projectCount,
+    ).toBe(1);
+  });
+
+  it("en son güncellenen proje aktif plan olarak gösterilir", () => {
+    const { state, dijivo } = hubState();
+    const project = state.projects!.find((p) => p.brandId === dijivo.id)!;
+    const older = { ...project, updatedAt: "2026-09-01T10:00:00.000Z" };
+    const newer = {
+      ...project,
+      id: "project-newer",
+      name: "Kasım 2026",
+      updatedAt: "2026-10-20T10:00:00.000Z",
+    };
+    const stats = computeBrandCardStats(dijivo.id, [older, newer]);
+    expect(stats.latestProject?.id).toBe("project-newer");
+    expect(stats.latestProject?.name).toBe("Kasım 2026");
+    expect(stats.lastUpdatedAt).toBe("2026-10-20T10:00:00.000Z");
+  });
+
+  it("içerik sayısı aktif plandaki mevcut + planlanan toplamıdır", () => {
+    const { state, dijivo } = hubState();
+    const project = state.projects!.find((p) => p.brandId === dijivo.id)!;
+    const withContent = {
+      ...project,
+      existingPosts: [existingPost("e1"), existingPost("e2")],
+      plannedPosts: [plannedPost("p1")],
+    };
+    const stats = computeBrandCardStats(dijivo.id, [withContent]);
+    expect(stats.contentCount).toBe(3);
+  });
+
+  it("projesi olmayan marka sıfır bilgi gösterir", () => {
+    const stats = computeBrandCardStats("brand-none", []);
+    expect(stats.projectCount).toBe(0);
+    expect(stats.latestProject).toBeNull();
+    expect(stats.contentCount).toBe(0);
+    expect(stats.lastUpdatedAt).toBeNull();
+  });
+});
+
+describe("son güncelleme metni (§3)", () => {
+  it("aynı gün → Bugün", () => {
+    expect(formatBrandActivity("2026-10-01T10:00:00.000Z", NOW)).toBe("Bugün");
+  });
+
+  it("dün → Dün", () => {
+    expect(formatBrandActivity("2026-09-30T10:00:00.000Z", NOW)).toBe("Dün");
+  });
+
+  it("bu hafta → N gün önce", () => {
+    expect(formatBrandActivity("2026-09-28T10:00:00.000Z", NOW)).toBe(
+      "3 gün önce",
+    );
+  });
+
+  it("daha eskisi → tarih (tr-TR)", () => {
+    expect(formatBrandActivity("2026-05-12T10:00:00.000Z", NOW)).toBe(
+      "12 Mayıs 2026",
+    );
+  });
+});
+
+describe("profil düzenleme — bağlam korunur (§8/§11)", () => {
+  function hubState() {
+    const first = createBrandState(
+      getDefaultAppState(),
+      brandInput("Dijivo", "dijivo"),
+      NOW,
+    )!;
+    const second = createBrandState(
+      first.state,
+      brandInput("X Markası", "ximarkasi"),
+      NOW,
+    )!;
+    // createBrandState son oluşturulan markayı aktif eder; bu senaryoda
+    // Dijivo aktif, X Markası pasif olmalı.
+    return {
+      state: selectBrandState(second.state, first.brand.id)!,
+      dijivo: first.brand,
+      ximarkasi: second.brand,
+    };
+  }
+
+  it("aktif olmayan marka düzenlenirken activeBrandId değişmez", () => {
+    const { state, dijivo, ximarkasi } = hubState();
+    const editedX: Brand = { ...ximarkasi, bio: "Yeni bio" };
+    const next = updateBrandState(state, ximarkasi.id, editedX);
+    expect(next.activeBrandId).toBe(dijivo.id);
+    expect(next.brand.id).toBe(dijivo.id);
+    expect(
+      next.brands?.find((b) => b.id === ximarkasi.id)?.bio,
+    ).toBe("Yeni bio");
+    // Dijivo'nun bio'su dokunulmamış kalmalı.
+    expect(next.brands?.find((b) => b.id === dijivo.id)?.bio).toBe(
+      "Dijivo bio",
+    );
+  });
+
+  it("aktif marka düzenlenirken üst düzey ayna senkronize olur", () => {
+    const { state, dijivo } = hubState();
+    const edited: Brand = { ...dijivo, name: "Dijivo Studio" };
+    const next = updateBrandState(state, dijivo.id, edited);
+    expect(next.activeBrandId).toBe(dijivo.id);
+    expect(next.brand.name).toBe("Dijivo Studio");
+    const activeProject = next.projects!.find(
+      (p) => p.id === next.activeProjectId,
+    )!;
+    expect(activeProject.brand.name).toBe("Dijivo Studio");
   });
 });

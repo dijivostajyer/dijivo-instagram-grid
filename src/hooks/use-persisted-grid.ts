@@ -33,6 +33,7 @@ import {
   selectBrandState,
   selectProjectState,
   syncActiveProject,
+  updateBrandState,
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 
@@ -140,6 +141,8 @@ export interface PersistedGrid {
   /** Aktif markayı değiştirir; o markanın en son projesi seçilir. */
   selectBrand: (id: string) => void;
   setBrand: (next: Brand) => void;
+  /** İstenen markanın profilini günceller; aktif bağlam değişmez (§8/§11). */
+  updateBrand: (id: string, next: Brand) => void;
   setExistingPosts: (next: ExistingPost[] | ((prev: ExistingPost[]) => ExistingPost[])) => void;
   setPlannedPosts: (next: PlannedPost[] | ((prev: PlannedPost[]) => PlannedPost[])) => void;
   /** Object URL'i IndexedDB'ye kalıcılaştırır (yükleme akışlarında çağrılır). */
@@ -259,8 +262,8 @@ export function usePersistedGrid(): PersistedGrid {
     }
   }, []);
 
-  const setBrand = useCallback(
-    (next: Brand) => {
+  const updateBrand = useCallback(
+    (id: string, next: Brand) => {
       const imageUrls = [next.profileImageUrl, ...(next.highlights ?? []).map((highlight) => highlight.imageUrl)];
       for (const url of imageUrls) {
         if (url?.startsWith("blob:") && !refByObjectUrl.current.has(url)) {
@@ -268,11 +271,10 @@ export function usePersistedGrid(): PersistedGrid {
         }
       }
       const previousState = stateRef.current;
-      // §7: marka düzenlemesi kayıt defterindeki aktif marka girişini günceller.
-      const brands = (previousState.brands ?? []).map((brand) =>
-        brand.id === previousState.activeBrandId ? next : brand,
-      );
-      const nextState = syncActiveProject({ ...previousState, brand: next, brands });
+      // §7/§8/§11: marka düzenlemesi kayıt defterindeki ilgili
+      // marka girişini günceller; aktif bağlam yalnızca aktif
+      // marka düzenlenirse etkilenir.
+      const nextState = updateBrandState(previousState, id, next);
       void cleanUpRemovedImages({
         previousState,
         nextState,
@@ -282,6 +284,13 @@ export function usePersistedGrid(): PersistedGrid {
       commit(nextState);
     },
     [commit, persistUpload],
+  );
+
+  const setBrand = useCallback(
+    (next: Brand) => {
+      updateBrand(stateRef.current.activeBrandId ?? "", next);
+    },
+    [updateBrand],
   );
 
   const createBrand = useCallback(
@@ -408,6 +417,7 @@ export function usePersistedGrid(): PersistedGrid {
     createBrand,
     selectBrand,
     setBrand,
+    updateBrand,
     setExistingPosts,
     setPlannedPosts,
     persistUpload,
