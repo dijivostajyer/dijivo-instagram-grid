@@ -182,9 +182,6 @@ export default function GridManager() {
   const selectedExisting = existingPosts.find((post) => post.id === selectedPostId);
   const selectedPlanned = plannedPosts.find((post) => post.id === selectedPostId);
   const selectedPost = selectedExisting ?? selectedPlanned ?? null;
-  const selectedCellIndex = selectedPost
-    ? grid.cells.findIndex((cell) => cell.post.id === selectedPostId)
-    : -1;
 
   const activeProject = projects.find((project) => project.id === activeProjectId);
 
@@ -656,11 +653,6 @@ export default function GridManager() {
           post={selectedPost}
           source={selectedExisting ? "mevcut" : "planlanan"}
           brand={brand}
-          gridPosition={
-            selectedCellIndex >= 0
-              ? { index: selectedCellIndex + 1, total: grid.cells.length }
-              : null
-          }
           allProjects={allProjects}
           brands={brands}
           onPostTypeChange={(postType) => {

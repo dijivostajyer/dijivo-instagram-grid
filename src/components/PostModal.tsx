@@ -30,12 +30,6 @@ import type {
 
 type Source = "mevcut" | "planlanan";
 
-const postTypeLabels: Record<PostType, string> = {
-  post: "Post",
-  reel: "Reel",
-  carousel: "Carousel",
-};
-
 /**
  * İçerik detay modalı (§11/§12): gridden veya içerik listesinden
  * bir gönderi seçildiğinde dimlenmiş arka plan üzerinde ortalanmış
@@ -46,7 +40,6 @@ export default function PostModal({
   post,
   source,
   brand,
-  gridPosition,
   allProjects,
   brands,
   onPostTypeChange,
@@ -59,9 +52,9 @@ export default function PostModal({
   onClose,
 }: {
   post: ExistingPost | PlannedPost;
+  /** Yalnızca pin görünürlüğü gibi iş kuralları için; arayüzde gösterilmez. */
   source: Source;
   brand: Brand;
-  gridPosition: { index: number; total: number } | null;
   /** Kopya hedefi seçici için tüm projeler (tüm markalar). */
   allProjects: GridProject[];
   /** Hedef marka adları için marka kayıt defteri. */
@@ -168,7 +161,7 @@ export default function PostModal({
       className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={`İçerik düzenle: ${title}`}
+      aria-label={`İçeriği düzenle: ${title}`}
     >
       <div
         className="fixed inset-0 bg-black/50"
@@ -234,13 +227,7 @@ export default function PostModal({
             <span className="flex-1" />
             <BookmarkIcon className="size-6" aria-hidden="true" />
           </div>
-          <p className="px-4 pt-2 text-sm font-semibold">
-            {postTypeLabels[post.postType ?? "post"]} ·{" "}
-            {gridPosition
-              ? `Grid ${gridPosition.index}/${gridPosition.total}`
-              : "Gridde değil"}
-          </p>
-          <p className="px-4 pt-2 text-sm leading-relaxed">
+          <p className="px-4 pt-2 pb-4 text-sm leading-relaxed">
             <span className="font-semibold">{brand.username}</span>{" "}
             {captionParts.map((part, index) =>
               part.startsWith("#") ? (
@@ -255,9 +242,6 @@ export default function PostModal({
               ),
             )}
           </p>
-          <p className={`px-4 pt-3 pb-4 text-xs ${dark ? "text-neutral-500" : "text-neutral-400"}`}>
-            Dijivo Grid önizlemesi
-          </p>
         </div>
 
         {/* Sağ sütun: düzenleyici (§12) */}
@@ -265,10 +249,10 @@ export default function PostModal({
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className={`text-base font-semibold ${darkText}`}>
-                İçerik düzenle
+                İçeriği Düzenle
               </h2>
               <p className={`mt-0.5 text-sm ${darkMuted}`}>
-                {source === "mevcut" ? "Mevcut gönderi" : "Planlanan gönderi"}
+                @{brand.username}
               </p>
             </div>
             <button
@@ -358,7 +342,7 @@ export default function PostModal({
                 id="modal-caption"
                 value={caption}
                 onChange={(event) => onCaptionChange(event.target.value)}
-                rows={4}
+                rows={5}
                 placeholder="Gönderi açıklaması; #hashtag ve @mention doğrudan yazılabilir."
                 className={`w-full rounded-lg border px-2.5 py-2 text-sm outline-none focus:border-sky-600 ${darkBorder} ${darkSurface} ${darkText}`}
               />
@@ -549,45 +533,17 @@ export default function PostModal({
               </button>
             </form>
 
-            {/* Metaveri (§12) */}
-            <dl className={`space-y-1.5 rounded-xl border p-4 text-sm ${darkBorder} ${darkSurface}`}>
-              <div className="flex justify-between gap-2">
-                <dt className={darkMuted}>Kaynak</dt>
-                <dd className={`font-medium ${darkText}`}>
-                  {source === "mevcut" ? "Mevcut gönderi" : "Planlanan gönderi"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className={darkMuted}>Grid konumu</dt>
-                <dd className={`font-medium ${darkText}`}>
-                  {gridPosition
-                    ? `${gridPosition.index} / ${gridPosition.total}`
-                    : "Gridde değil"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className={darkMuted}>Görsel oranı</dt>
-                <dd className={`font-medium ${darkText}`}>
-                  {post.aspectRatio ?? "1:1"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className={darkMuted}>Kimlik</dt>
-                <dd className={`max-w-[60%] truncate font-mono text-xs ${darkMuted}`}>
-                  {post.id}
-                </dd>
-              </div>
-            </dl>
-
-            {/* Sil */}
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-            >
-              <TrashIcon className="size-4" aria-hidden="true" />
-              İçeriği sil
-            </button>
+            {/* Sil: yıkıcı aksiyon, ana düzenleme alanından ayrılır */}
+            <div className="border-t border-slate-200 pt-4 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+              >
+                <TrashIcon className="size-4" aria-hidden="true" />
+                İçeriği sil
+              </button>
+            </div>
           </div>
         </div>
       </div>
