@@ -113,6 +113,21 @@ describe("persisted image lifecycle cleanup", () => {
     expect(removeStoredImage).not.toHaveBeenCalled();
   });
 
+  it("başka projede kullanılan ref silinmez; son proje de bırakınca silinir", async () => {
+    const objectUrl = "blob:https://app.test/cross-project";
+    const ref = makeImageRef("cross-project");
+    const project = {
+      id: "project-b", name: "B", month: 2, year: 2026, createdAt: "2026-02-01T00:00:00.000Z", updatedAt: "2026-02-01T00:00:00.000Z",
+      brand: { id: "brand-b", name: "B", username: "b" }, existingPosts: [], plannedPosts: [{ id: "b-post", source: "planlanan" as const, imageUrl: objectUrl, planOrder: 0 }],
+    };
+    const removeStoredImage = vi.fn(async () => undefined);
+    const previous = state({ plannedPosts: [{ id: "a-post", source: "planlanan", imageUrl: objectUrl, planOrder: 0 }], projects: [project] });
+    await cleanUpRemovedImages({ previousState: previous, nextState: state({ projects: [project] }), refByObjectUrl: new Map([[objectUrl, ref]]), trackedObjectUrls: new Set([objectUrl]), revokeObjectUrl: vi.fn(), deleteStoredImage: removeStoredImage });
+    expect(removeStoredImage).not.toHaveBeenCalled();
+    await cleanUpRemovedImages({ previousState: state({ projects: [project] }), nextState: state(), refByObjectUrl: new Map([[objectUrl, ref]]), trackedObjectUrls: new Set([objectUrl]), revokeObjectUrl: vi.fn(), deleteStoredImage: removeStoredImage });
+    expect(removeStoredImage).toHaveBeenCalledWith(ref);
+  });
+
   it("reset veya unmount sonrası takip edilen bütün object URL'leri revoke eder", () => {
     const first = "blob:https://app.test/first";
     const second = "blob:https://app.test/second";

@@ -1,4 +1,4 @@
-import type { Brand, GridResult, PostSource } from "./types";
+import type { Brand, GridResult, PostSource, PostType, Highlight } from "./types";
 import { isValidShareToken } from "./share-token";
 
 export const SHARE_SNAPSHOT_VERSION = 1;
@@ -11,6 +11,10 @@ export interface ShareBrand {
   username: string;
   bio?: string;
   profileImageUrl?: string;
+  postCount?: number;
+  followersCount?: number;
+  followingCount?: number;
+  highlights?: Highlight[];
 }
 
 export interface ShareGridCell {
@@ -22,6 +26,7 @@ export interface ShareGridCell {
   row: number;
   column: number;
   pinned: boolean;
+  postType?: PostType;
 }
 
 export interface ShareSnapshotInput {
@@ -67,6 +72,10 @@ function isShareBrand(value: unknown): value is ShareBrand {
     typeof value.username === "string" &&
     isOptionalString(value.bio) &&
     isOptionalString(value.profileImageUrl) &&
+    (value.postCount === undefined || typeof value.postCount === "number") &&
+    (value.followersCount === undefined || typeof value.followersCount === "number") &&
+    (value.followingCount === undefined || typeof value.followingCount === "number") &&
+    (value.highlights === undefined || (Array.isArray(value.highlights) && value.highlights.every((highlight) => isRecord(highlight) && typeof highlight.id === "string" && typeof highlight.title === "string" && isOptionalString(highlight.imageUrl)))) &&
     (value.profileImageUrl === undefined || isShareableImageUrl(value.profileImageUrl))
   );
 }
@@ -83,6 +92,7 @@ function isShareGridCell(value: unknown): value is ShareGridCell {
     typeof value.row === "number" &&
     typeof value.column === "number" &&
     typeof value.pinned === "boolean"
+    && (value.postType === undefined || value.postType === "post" || value.postType === "reel" || value.postType === "carousel")
   );
 }
 
@@ -93,7 +103,7 @@ export function validateShareSnapshotInput(value: unknown): ShareSnapshotInput |
   const cells: ShareGridCell[] = [];
   for (const cell of value.cells) {
     if (!isShareGridCell(cell)) return null;
-    cells.push({ ...cell });
+    cells.push({ ...cell, postType: cell.postType ?? "post" });
   }
   if (cells.length === 0 || cells.length > MAX_SHARE_CELLS) return null;
   return { brand: { ...value.brand }, cells };
@@ -155,6 +165,10 @@ export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnaps
       username: brand.username,
       bio: brand.bio,
       profileImageUrl: brand.profileImageUrl,
+      postCount: brand.postCount,
+      followersCount: brand.followersCount,
+      followingCount: brand.followingCount,
+      highlights: brand.highlights,
     },
     cells: result.cells.map((cell) => ({
       id: cell.post.id,
@@ -165,6 +179,7 @@ export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnaps
       row: cell.row,
       column: cell.column,
       pinned: cell.pinned,
+      postType: cell.post.postType ?? "post",
     })),
   };
 }

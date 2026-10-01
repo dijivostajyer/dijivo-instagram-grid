@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BookmarkIcon, ClockIcon } from "@heroicons/react/16/solid";
+import { BookmarkIcon, ClockIcon, PlayIcon, RectangleStackIcon } from "@heroicons/react/16/solid";
 
 import type { Brand, GridResult } from "@/lib/types";
 
@@ -81,6 +81,16 @@ function GridCellView({
           Plan
         </span>
       ) : null}
+      {post.postType === "reel" ? (
+        <span className="absolute right-2 top-2 rounded-full bg-black/70 p-1 text-white" title="Reel">
+          <PlayIcon className="size-3" aria-hidden="true" />
+        </span>
+      ) : null}
+      {post.postType === "carousel" ? (
+        <span className="absolute right-2 top-2 rounded-full bg-black/70 p-1 text-white" title="Carousel">
+          <RectangleStackIcon className="size-3" aria-hidden="true" />
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -126,6 +136,22 @@ export default function GridPreview({
           ) : null}
         </div>
       </header>
+
+      <div className="mb-5 grid grid-cols-3 gap-3 text-center text-sm">
+        <p><strong className="block">{brand.postCount ?? result.cells.length}</strong>gönderi</p>
+        <p><strong className="block">{brand.followersCount ?? 0}</strong>takipçi</p>
+        <p><strong className="block">{brand.followingCount ?? 0}</strong>takip</p>
+      </div>
+      {brand.highlights?.length ? (
+        <div className="mb-5 flex gap-3 overflow-x-auto pb-1">
+          {brand.highlights.map((highlight) => (
+            <div key={highlight.id} className="w-16 shrink-0 text-center text-xs text-neutral-600">
+              {highlight.imageUrl ? <img src={highlight.imageUrl} alt="" className="mx-auto size-12 rounded-full object-cover ring-1 ring-black/10" /> : <span className="mx-auto block size-12 rounded-full bg-neutral-100 ring-1 ring-black/10" />}
+              <span className="mt-1 block truncate">{highlight.title}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl bg-black/10 outline-1 -outline-offset-1 outline-black/10">
         {result.cells.map((cell) => (

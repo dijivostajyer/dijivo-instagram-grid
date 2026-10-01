@@ -6,18 +6,18 @@ import {
   SAMPLE_BRAND,
   SAMPLE_EXISTING_POSTS,
   SAMPLE_PLANNED_POSTS,
-} from "@/data/sample-data";
+} from "../data/sample-data";
 import {
   clearStoredImages,
   deleteStoredImage,
   isImageRef,
   loadImageAsObjectUrl,
   persistObjectUrl,
-} from "@/lib/image-store";
+} from "../lib/image-store";
 import {
   cleanUpRemovedImages,
   revokeTrackedObjectUrls,
-} from "@/lib/image-lifecycle";
+} from "../lib/image-lifecycle";
 import {
   clearPersistedState,
   loadAppState,
@@ -25,18 +25,23 @@ import {
   toPersistableState,
   writePersistedState,
   type PersistedAppState,
+  createProjectFromState,
+  type GridProject,
   type StorageLike,
-} from "@/lib/storage";
-import type { Brand, ExistingPost, PlannedPost } from "@/lib/types";
+} from "../lib/storage";
+import type { Brand, ExistingPost, PlannedPost } from "../lib/types";
+import { findPreviousMonthProject } from "../lib/project-ops";
 
 /** Demo/varsayılan durum (ilk açılış ve sıfırlama sonrası). */
 export function getDefaultAppState(): PersistedAppState {
-  return {
+  const base = {
     version: STORAGE_VERSION,
     brand: { ...SAMPLE_BRAND },
     existingPosts: SAMPLE_EXISTING_POSTS.map((post) => ({ ...post })),
     plannedPosts: SAMPLE_PLANNED_POSTS.map((post) => ({ ...post })),
   };
+  const project = createProjectFromState(base);
+  return { ...base, projects: [project], activeProjectId: project.id };
 }
 
 function getBrowserStorage(): StorageLike | null {
@@ -53,13 +58,16 @@ function getBrowserStorage(): StorageLike | null {
  * çözdüğü eşlemeyi `refByObjectUrl` haritasına yazar (geri yazarken gerekir).
  * Blob'u bulunamayan görsel/düşer: uygulama bozuk referansla çalışmaz.
  */
-async function hydrateState(
+export async function hydrateState(
   state: PersistedAppState,
   refByObjectUrl: Map<string, string>,
   trackedObjectUrls: Set<string>,
 ): Promise<PersistedAppState> {
   const resolve = async (value: string | undefined): Promise<string | undefined> => {
     if (value === undefined || !isImageRef(value)) return value;
+    for (const [objectUrl, ref] of refByObjectUrl) {
+      if (ref === value) return objectUrl;
+    }
     const objectUrl = await loadImageAsObjectUrl(value);
     if (objectUrl === null) return undefined;
     refByObjectUrl.set(objectUrl, value);
@@ -67,7 +75,15 @@ async function hydrateState(
     return objectUrl;
   };
 
-  const profileImageUrl = await resolve(state.brand.profileImageUrl);
+  const hydrateBrand = async (brand: Brand): Promise<Brand> => ({
+    ...brand,
+    profileImageUrl: await resolve(brand.profileImageUrl),
+    highlights: await Promise.all((brand.highlights ?? []).map(async (highlight) => ({
+      ...highlight,
+      imageUrl: await resolve(highlight.imageUrl),
+    }))),
+  });
+  const hydratedBrand = await hydrateBrand(state.brand);
 
   const existingPosts: ExistingPost[] = [];
   for (const post of state.existingPosts) {
@@ -83,11 +99,34 @@ async function hydrateState(
     plannedPosts.push({ ...post, imageUrl });
   }
 
-  return {
+  const projects = await Promise.all((state.projects ?? []).map(async (project) => ({
+    ...project,
+    brand: await hydrateBrand(project.brand),
+    existingPosts: (await Promise.all(project.existingPosts.map(async (post) => {
+      const imageUrl = await resolve(post.imageUrl);
+      return imageUrl === undefined ? null : { ...post, imageUrl };
+    }))).filter((post): post is ExistingPost => post !== null),
+    plannedPosts: (await Promise.all(project.plannedPosts.map(async (post) => {
+      const imageUrl = await resolve(post.imageUrl);
+      return imageUrl === undefined ? null : { ...post, imageUrl };
+    }))).filter((post): post is PlannedPost => post !== null),
+  })));
+  const hydrated = {
     version: STORAGE_VERSION,
-    brand: { ...state.brand, profileImageUrl },
+    brand: hydratedBrand,
     existingPosts,
     plannedPosts,
+    projects,
+    activeProjectId: state.activeProjectId,
+  };
+  return syncActiveProject(hydrated);
+}
+
+function syncActiveProject(state: PersistedAppState): PersistedAppState {
+  if (!state.projects?.length || !state.activeProjectId) return state;
+  return {
+    ...state,
+    projects: state.projects.map((project) => project.id === state.activeProjectId ? { ...project, brand: state.brand, existingPosts: state.existingPosts, plannedPosts: state.plannedPosts, updatedAt: new Date().toISOString() } : project),
   };
 }
 
@@ -104,6 +143,10 @@ export interface PersistedGrid {
   persistUpload: (objectUrl: string) => Promise<void>;
   /** Kalıcı veriyi siler ve demo varsayılanlarına döner. */
   resetToDefaults: () => Promise<void>;
+  projects: GridProject[];
+  activeProjectId: string;
+  selectProject: (id: string) => void;
+  createProject: (name: string, month: number, year: number, copyPrevious: boolean) => string | null;
 }
 
 /**
@@ -194,17 +237,14 @@ export function usePersistedGrid(): PersistedGrid {
 
   const setBrand = useCallback(
     (next: Brand) => {
-      const previous = stateRef.current.brand.profileImageUrl;
-      if (
-        next.profileImageUrl &&
-        next.profileImageUrl !== previous &&
-        next.profileImageUrl.startsWith("blob:") &&
-        !refByObjectUrl.current.has(next.profileImageUrl)
-      ) {
-        void persistUpload(next.profileImageUrl);
+      const imageUrls = [next.profileImageUrl, ...(next.highlights ?? []).map((highlight) => highlight.imageUrl)];
+      for (const url of imageUrls) {
+        if (url?.startsWith("blob:") && !refByObjectUrl.current.has(url)) {
+          void persistUpload(url);
+        }
       }
       const previousState = stateRef.current;
-      const nextState = { ...previousState, brand: next };
+      const nextState = syncActiveProject({ ...previousState, brand: next });
       stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
@@ -220,11 +260,11 @@ export function usePersistedGrid(): PersistedGrid {
   const setExistingPosts = useCallback(
     (next: ExistingPost[] | ((prev: ExistingPost[]) => ExistingPost[])) => {
       const previousState = stateRef.current;
-      const nextState = {
+      const nextState = syncActiveProject({
         ...previousState,
         existingPosts:
           typeof next === "function" ? next(previousState.existingPosts) : next,
-      };
+      });
       stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
@@ -240,11 +280,11 @@ export function usePersistedGrid(): PersistedGrid {
   const setPlannedPosts = useCallback(
     (next: PlannedPost[] | ((prev: PlannedPost[]) => PlannedPost[])) => {
       const previousState = stateRef.current;
-      const nextState = {
+      const nextState = syncActiveProject({
         ...previousState,
         plannedPosts:
           typeof next === "function" ? next(previousState.plannedPosts) : next,
-      };
+      });
       stateRef.current = nextState;
       void cleanUpRemovedImages({
         previousState,
@@ -272,6 +312,38 @@ export function usePersistedGrid(): PersistedGrid {
     setState(defaults);
   }, []);
 
+  const selectProject = useCallback((id: string) => {
+    const current = stateRef.current;
+    const project = current.projects?.find((item) => item.id === id);
+    if (!project) return;
+    const next = { ...current, activeProjectId: id, brand: project.brand, existingPosts: project.existingPosts, plannedPosts: project.plannedPosts };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
+  const createProject = useCallback((name: string, month: number, year: number, copyPrevious: boolean): string | null => {
+    const current = syncActiveProject(stateRef.current);
+    const previous = copyPrevious ? findPreviousMonthProject(current.projects ?? [], month, year) : null;
+    if (copyPrevious && !previous) return "Önceki aya ait kopyalanacak proje bulunamadı.";
+    const source = previous ? { brand: previous.brand, existingPosts: previous.existingPosts, plannedPosts: previous.plannedPosts } : { brand: { ...current.brand, profileImageUrl: undefined }, existingPosts: [], plannedPosts: [] };
+    const timestamp = new Date().toISOString();
+    const project: GridProject = {
+      id: `project-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+      name: name.trim() || `${month}/${year}`,
+      month,
+      year,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      brand: { ...source.brand, highlights: source.brand.highlights?.map((highlight) => ({ ...highlight, id: `highlight-${timestamp}-${highlight.id}` })) },
+      existingPosts: source.existingPosts.map((post) => ({ ...post, id: `existing-${timestamp}-${post.id}` })),
+      plannedPosts: source.plannedPosts.map((post) => ({ ...post, id: `planned-${timestamp}-${post.id}` })),
+    };
+    const next = { ...current, activeProjectId: project.id, brand: project.brand, existingPosts: project.existingPosts, plannedPosts: project.plannedPosts, projects: [...(current.projects ?? []), project] };
+    stateRef.current = next;
+    setState(next);
+    return null;
+  }, []);
+
   return {
     brand: state.brand,
     existingPosts: state.existingPosts,
@@ -282,5 +354,9 @@ export function usePersistedGrid(): PersistedGrid {
     setPlannedPosts,
     persistUpload,
     resetToDefaults,
+    projects: state.projects ?? [],
+    activeProjectId: state.activeProjectId ?? "",
+    selectProject,
+    createProject,
   };
 }

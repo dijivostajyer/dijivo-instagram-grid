@@ -1,4 +1,4 @@
-import type { Brand, ExistingPost, PlannedPost } from "./types";
+import type { Brand, ExistingPost, PlannedPost, PostType } from "./types";
 
 /**
  * Uygulama metaverisi kalıcılığı (MVP aşama 4).
@@ -14,7 +14,7 @@ import type { Brand, ExistingPost, PlannedPost } from "./types";
  */
 
 /** Depolama şeması sürümü; artırıldığında eski veri bilinçli olarak reddedilir. */
-export const STORAGE_VERSION = 1;
+export const STORAGE_VERSION = 2;
 
 /** localStorage anahtarı. */
 export const STORAGE_KEY = "dijivo-grid-state";
@@ -29,6 +29,21 @@ export interface StorageLike {
 /** Kalıcı hale getirilebilecek uygulama durumunun şeması. */
 export interface PersistedAppState {
   version: number;
+  brand: Brand;
+  existingPosts: ExistingPost[];
+  plannedPosts: PlannedPost[];
+  /** v2: birden çok takvim projesi. Eski kayıtlar açılışta tek projeye taşınır. */
+  projects?: GridProject[];
+  activeProjectId?: string;
+}
+
+export interface GridProject {
+  id: string;
+  name: string;
+  month: number;
+  year: number;
+  createdAt: string;
+  updatedAt: string;
   brand: Brand;
   existingPosts: ExistingPost[];
   plannedPosts: PlannedPost[];
@@ -52,6 +67,10 @@ function isAspectRatio(value: unknown): boolean {
   );
 }
 
+function isPostType(value: unknown): value is PostType {
+  return value === undefined || value === "post" || value === "reel" || value === "carousel";
+}
+
 function isBrand(value: unknown): value is Brand {
   if (!isRecord(value)) return false;
   return (
@@ -60,6 +79,10 @@ function isBrand(value: unknown): value is Brand {
     typeof value.username === "string" &&
     isOptionalString(value.profileImageUrl) &&
     isOptionalString(value.bio)
+    && (value.postCount === undefined || typeof value.postCount === "number")
+    && (value.followersCount === undefined || typeof value.followersCount === "number")
+    && (value.followingCount === undefined || typeof value.followingCount === "number")
+    && (value.highlights === undefined || (Array.isArray(value.highlights) && value.highlights.every((highlight) => isRecord(highlight) && typeof highlight.id === "string" && typeof highlight.title === "string" && isOptionalString(highlight.imageUrl))))
   );
 }
 
@@ -71,6 +94,7 @@ function isExistingPost(value: unknown): value is ExistingPost {
     typeof value.imageUrl === "string" &&
     isOptionalString(value.alt) &&
     isAspectRatio(value.aspectRatio) &&
+    isPostType(value.postType) &&
     typeof value.recencyIndex === "number" &&
     typeof value.pinned === "boolean" &&
     (value.pinnedOrder === undefined || typeof value.pinnedOrder === "number")
@@ -85,6 +109,7 @@ function isPlannedPost(value: unknown): value is PlannedPost {
     typeof value.imageUrl === "string" &&
     isOptionalString(value.alt) &&
     isAspectRatio(value.aspectRatio) &&
+    isPostType(value.postType) &&
     typeof value.planOrder === "number"
   );
 }
@@ -109,6 +134,29 @@ function parsePlannedPosts(value: unknown): PlannedPost[] | null {
   return posts;
 }
 
+function normalizePosts<T extends ExistingPost | PlannedPost>(posts: T[]): T[] {
+  return posts.map((post) => ({ ...post, postType: post.postType ?? "post" }));
+}
+
+function currentProjectName(month: number, year: number): string {
+  return new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(new Date(year, month - 1));
+}
+
+export function createProjectFromState(state: Omit<PersistedAppState, "projects" | "activeProjectId">, now = new Date()): GridProject {
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const timestamp = now.toISOString();
+  return { id: `project-${timestamp}`, name: currentProjectName(month, year), month, year, createdAt: timestamp, updatedAt: timestamp, brand: state.brand, existingPosts: normalizePosts(state.existingPosts), plannedPosts: normalizePosts(state.plannedPosts) };
+}
+
+function isProject(value: unknown): value is GridProject {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || typeof value.name !== "string") return false;
+  const month = value.month;
+  const year = value.year;
+  if (typeof month !== "number" || !Number.isInteger(month) || month < 1 || month > 12 || typeof year !== "number" || !Number.isInteger(year) || year < 2000 || year > 2100 || typeof value.createdAt !== "string" || Number.isNaN(Date.parse(value.createdAt)) || typeof value.updatedAt !== "string" || Number.isNaN(Date.parse(value.updatedAt)) || !isBrand(value.brand)) return false;
+  return parseExistingPosts(value.existingPosts) !== null && parsePlannedPosts(value.plannedPosts) !== null;
+}
+
 /** Durumu JSON metnine çevirir (şema sürümü eklenir). */
 export function serializeAppState(state: PersistedAppState): string {
   return JSON.stringify({
@@ -116,6 +164,8 @@ export function serializeAppState(state: PersistedAppState): string {
     brand: state.brand,
     existingPosts: state.existingPosts,
     plannedPosts: state.plannedPosts,
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
   });
 }
 
@@ -135,19 +185,27 @@ export function deserializeAppState(
     return null;
   }
   if (!isRecord(raw)) return null;
-  // Şema sürümü eşleşmiyorsa (gelecek/eski sürüm) reddet.
-  if (raw.version !== STORAGE_VERSION) return null;
+  if (raw.version !== 1 && raw.version !== STORAGE_VERSION) return null;
   if (!isBrand(raw.brand)) return null;
   const existingPosts = parseExistingPosts(raw.existingPosts);
   if (!existingPosts) return null;
   const plannedPosts = parsePlannedPosts(raw.plannedPosts);
   if (!plannedPosts) return null;
-  return {
+  const legacyState = {
     version: STORAGE_VERSION,
-    brand: raw.brand,
+    brand: raw.brand as Brand,
     existingPosts,
     plannedPosts,
   };
+  if (raw.version === 1) {
+    const project = createProjectFromState(legacyState, new Date(0));
+    return { ...legacyState, projects: [project], activeProjectId: project.id };
+  }
+  if (raw.projects === undefined) return legacyState;
+  if (!Array.isArray(raw.projects) || !raw.projects.every(isProject) || typeof raw.activeProjectId !== "string") return null;
+  const ids = raw.projects.map((project) => project.id);
+  if (new Set(ids).size !== ids.length || !ids.includes(raw.activeProjectId)) return null;
+  return { ...legacyState, projects: raw.projects.map((project) => ({ ...project, existingPosts: normalizePosts(project.existingPosts), plannedPosts: normalizePosts(project.plannedPosts) })), activeProjectId: raw.activeProjectId };
 }
 
 /** localStorage'dan durumu okur; her türlü hatada `null` döner. */
@@ -217,6 +275,11 @@ export function toPersistableState(
     return url;
   };
 
+  const persistBrand = (brand: Brand): Brand => ({
+    ...brand,
+    profileImageUrl: resolveUrl(brand.profileImageUrl),
+    highlights: brand.highlights?.map((highlight) => ({ ...highlight, imageUrl: resolveUrl(highlight.imageUrl) })),
+  });
   const profileImageUrl = resolveUrl(state.brand.profileImageUrl);
 
   const existingPosts: ExistingPost[] = [];
@@ -235,8 +298,10 @@ export function toPersistableState(
 
   return {
     version: STORAGE_VERSION,
-    brand: { ...state.brand, profileImageUrl },
+    brand: { ...persistBrand(state.brand), profileImageUrl },
     existingPosts,
     plannedPosts,
+    projects: state.projects?.map((project) => ({ ...project, brand: persistBrand(project.brand), existingPosts: project.existingPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is ExistingPost => post.imageUrl !== undefined), plannedPosts: project.plannedPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is PlannedPost => post.imageUrl !== undefined) })),
+    activeProjectId: state.activeProjectId,
   };
 }

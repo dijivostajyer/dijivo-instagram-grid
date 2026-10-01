@@ -89,6 +89,16 @@ describe("share snapshot", () => {
     expect(snapshot.cells.map((cell) => cell.position)).toEqual([0, 1, 2]);
   });
 
+  it("istatistikleri, öne çıkanları ve post türünü immutable snapshotta korur", () => {
+    const snapshot = createShareSnapshot(input({
+      brand: { ...input().brand, followersCount: 1200, highlights: [{ id: "h1", title: "Yeni" }] },
+      cells: [{ ...input().cells[0], postType: "reel" }],
+    }), TOKEN, CREATED_AT);
+    expect(snapshot.brand.followersCount).toBe(1200);
+    expect(snapshot.brand.highlights?.[0].title).toBe("Yeni");
+    expect(snapshot.cells[0].postType).toBe("reel");
+  });
+
   it("boş grid paylaşımını reddeder", () => {
     expect(() => createShareSnapshot(input({ cells: [] }), TOKEN, CREATED_AT)).toThrow(
       "Paylaşılabilir grid bulunamadı.",

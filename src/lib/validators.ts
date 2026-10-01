@@ -61,7 +61,7 @@ export function decodeImage(objectUrl: string): Promise<void> {
  */
 export async function loadImageFile(
   file: File,
-): Promise<{ url: string; alt: string }> {
+): Promise<{ url: string; alt: string; aspectRatio: "1:1" | "3:4" | "4:3" | "16:9" }> {
   const validation = validateImageFile(file);
   if (!validation.ok) throw new Error(validation.error);
   const url = URL.createObjectURL(file);
@@ -71,5 +71,22 @@ export async function loadImageFile(
     URL.revokeObjectURL(url);
     throw error;
   }
-  return { url, alt: file.name };
+  const aspectRatio = await detectAspectRatio(url);
+  return { url, alt: file.name, aspectRatio };
+}
+
+/** Kaynak oranını metadata olarak korur; grid önizlemesi Instagram gibi 1:1 kalır. */
+function detectAspectRatio(url: string): Promise<"1:1" | "3:4" | "4:3" | "16:9"> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const ratio = image.naturalWidth / image.naturalHeight;
+      const candidates = [
+        [1, "1:1"], [3 / 4, "3:4"], [4 / 3, "4:3"], [16 / 9, "16:9"],
+      ] as const;
+      resolve(candidates.reduce((best, candidate) => Math.abs(ratio - candidate[0]) < Math.abs(ratio - best[0]) ? candidate : best)[1]);
+    };
+    image.onerror = () => resolve("1:1");
+    image.src = url;
+  });
 }

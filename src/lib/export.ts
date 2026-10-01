@@ -7,9 +7,12 @@ export const A4_H = 841.89;
 
 /**
  * Export canvas scale: pixel size = A4 * EXPORT_SCALE, so the JPG output is
- * high-resolution (~1191x1684) while drawing stays in A4 point coordinates.
+ * 300 DPI A4 raster (2480x3508) while drawing stays in A4 point coordinates.
  */
-export const EXPORT_SCALE = 2;
+export const EXPORT_SCALE = 300 / 72;
+
+/** Tek yerde tanımlı, marka bağımsız export kimliği. */
+export const EXPORT_BRANDING = "Dijivo Grid Preview";
 
 /** Header/footer band heights of one export page (A4 points). */
 export const HEADER_HEIGHT = 140;
@@ -328,7 +331,7 @@ export function renderExportPage(
   ctx.fillStyle = "#6b7280";
   ctx.font = "9px Inter, system-ui, sans-serif";
   ctx.fillText(
-    `Dijivo Grid Preview · ${brand.name} · ${brand.username} · ${page + 1} / ${totalPages}`,
+    `${EXPORT_BRANDING} · ${brand.name} · ${brand.username} · ${page + 1} / ${totalPages}`,
     8,
     A4_H - 6,
   );

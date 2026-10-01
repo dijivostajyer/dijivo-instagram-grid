@@ -44,6 +44,7 @@ function gridResultFromSnapshot(
     row: number;
     column: number;
     pinned: boolean;
+    postType?: "post" | "reel" | "carousel";
   }>,
 ): GridResult {
   const ordered = [...cells].sort((a, b) => a.position - b.position);
@@ -62,6 +63,7 @@ function gridResultFromSnapshot(
               alt: cell.alt,
               recencyIndex: cell.position,
               pinned: cell.pinned,
+              postType: cell.postType ?? "post",
             }
           : {
               id: cell.id,
@@ -69,6 +71,7 @@ function gridResultFromSnapshot(
               imageUrl: cell.imageUrl,
               alt: cell.alt,
               planOrder: cell.position,
+              postType: cell.postType ?? "post",
             },
     })),
     rowCount: Math.ceil(ordered.length / 3),

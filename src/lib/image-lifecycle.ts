@@ -5,10 +5,15 @@ type ObjectUrlRevoker = (objectUrl: string) => void;
 type StoredImageDeleter = (ref: string) => Promise<void>;
 
 function imageUrls(state: PersistedAppState): string[] {
+  const collect = (brand: PersistedAppState["brand"], existingPosts: PersistedAppState["existingPosts"], plannedPosts: PersistedAppState["plannedPosts"]): Array<string | undefined> => [
+    brand.profileImageUrl,
+    ...(brand.highlights ?? []).map((highlight) => highlight.imageUrl),
+    ...existingPosts.map((post) => post.imageUrl),
+    ...plannedPosts.map((post) => post.imageUrl),
+  ];
   return [
-    state.brand.profileImageUrl,
-    ...state.existingPosts.map((post) => post.imageUrl),
-    ...state.plannedPosts.map((post) => post.imageUrl),
+    ...collect(state.brand, state.existingPosts, state.plannedPosts),
+    ...(state.projects ?? []).flatMap((project) => collect(project.brand, project.existingPosts, project.plannedPosts)),
   ].filter((url): url is string => typeof url === "string");
 }
 

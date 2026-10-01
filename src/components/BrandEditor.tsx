@@ -19,6 +19,8 @@ export default function BrandEditor({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const highlightInputRef = useRef<HTMLInputElement>(null);
+  const [highlightIdForUpload, setHighlightIdForUpload] = useState<string | null>(null);
 
   async function handleProfileImage(file: File | undefined) {
     if (!file) return;
@@ -32,6 +34,22 @@ export default function BrandEditor({
     } finally {
       setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleHighlightImage(file: File | undefined) {
+    if (!file || !highlightIdForUpload) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const { url } = await loadImageFile(file);
+      onChange({ ...brand, highlights: (brand.highlights ?? []).map((highlight) => highlight.id === highlightIdForUpload ? { ...highlight, imageUrl: url } : highlight) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Görsel yüklenemedi.");
+    } finally {
+      setBusy(false);
+      setHighlightIdForUpload(null);
+      if (highlightInputRef.current) highlightInputRef.current.value = "";
     }
   }
 
@@ -90,6 +108,34 @@ export default function BrandEditor({
               value={brand.name}
               onChange={(e) => onChange({ ...brand, name: e.target.value })}
             />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ["postCount", "Gönderi"],
+              ["followersCount", "Takipçi"],
+              ["followingCount", "Takip"],
+            ] as const).map(([field, label]) => (
+              <label key={field} className={labelClass}>{label}
+                <input type="number" min="0" className={inputClass} value={brand[field] ?? 0} onChange={(event) => onChange({ ...brand, [field]: Math.max(0, Number(event.target.value) || 0) })} />
+              </label>
+            ))}
+          </div>
+          <div>
+            <p className={labelClass}>Öne çıkanlar</p>
+            <div className="mt-2 grid gap-2">
+              {(brand.highlights ?? []).map((highlight) => (
+                <div className="flex gap-2" key={highlight.id}>
+                  <button type="button" aria-label={`${highlight.title} kapak görselini değiştir`} onClick={() => { setHighlightIdForUpload(highlight.id); highlightInputRef.current?.click(); }} className="shrink-0">
+                    {highlight.imageUrl ? <img src={highlight.imageUrl} alt="" className="size-9 rounded-full object-cover" /> : <span className="block size-9 rounded-full bg-neutral-100 ring-1 ring-black/10" />}
+                  </button>
+                  <input aria-label="Öne çıkan başlığı" className={inputClass} value={highlight.title} onChange={(event) => onChange({ ...brand, highlights: (brand.highlights ?? []).map((item) => item.id === highlight.id ? { ...item, title: event.target.value } : item) })} />
+                  {highlight.imageUrl ? <button type="button" aria-label={`${highlight.title} kapak görselini kaldır`} className="rounded-md px-2 text-sm text-neutral-600 hover:bg-neutral-100" onClick={() => onChange({ ...brand, highlights: (brand.highlights ?? []).map((item) => item.id === highlight.id ? { ...item, imageUrl: undefined } : item) })}>Kapağı kaldır</button> : null}
+                  <button type="button" className="rounded-md px-2 text-sm text-red-700 hover:bg-red-50" onClick={() => onChange({ ...brand, highlights: (brand.highlights ?? []).filter((item) => item.id !== highlight.id) })}>Sil</button>
+                </div>
+              ))}
+              <input ref={highlightInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => void handleHighlightImage(event.target.files?.[0])} />
+              <button type="button" className="w-fit rounded-md border border-black/10 px-2 py-1 text-sm font-medium hover:bg-neutral-50" onClick={() => onChange({ ...brand, highlights: [...(brand.highlights ?? []), { id: `highlight-${Date.now()}`, title: "Yeni öne çıkan" }] })}>Öne çıkan ekle</button>
+            </div>
           </div>
           <div>
             <label className={labelClass} htmlFor="brand-username">

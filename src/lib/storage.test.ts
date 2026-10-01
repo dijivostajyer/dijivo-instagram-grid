@@ -91,6 +91,32 @@ describe("serialize / deserialize", () => {
   });
 });
 
+describe("v1 proje migration", () => {
+  it("tek-grid v1 kaydını aktif projeye taşır ve eski post türünü post kabul eder", () => {
+    const old = { ...sampleState(), version: 1 };
+    const restored = deserializeAppState(JSON.stringify(old));
+    expect(restored?.version).toBe(STORAGE_VERSION);
+    expect(restored?.projects).toHaveLength(1);
+    expect(restored?.activeProjectId).toBe(restored?.projects?.[0].id);
+    expect(restored?.projects?.[0].existingPosts[0].postType).toBe("post");
+  });
+});
+
+describe("project validation", () => {
+  it("invalid month, duplicate ids ve bulunmayan aktif proje için güvenli fallback döner", () => {
+    const base = sampleState();
+    const project = { id: "project-1", name: "Eylül", month: 9, year: 2026, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z", brand: BRAND, existingPosts: [], plannedPosts: [] };
+    for (const invalid of [
+      { ...project, month: 13 },
+      { ...project, year: 1900 },
+    ]) {
+      expect(deserializeAppState(JSON.stringify({ ...base, projects: [invalid], activeProjectId: invalid.id }))).toBeNull();
+    }
+    expect(deserializeAppState(JSON.stringify({ ...base, projects: [project, { ...project }], activeProjectId: project.id }))).toBeNull();
+    expect(deserializeAppState(JSON.stringify({ ...base, projects: [project], activeProjectId: "missing" }))).toBeNull();
+  });
+});
+
 describe("corrupted / mismatched data fallback", () => {
   it("geçersiz JSON null döner", () => {
     expect(deserializeAppState("{bozuk json")).toBeNull();

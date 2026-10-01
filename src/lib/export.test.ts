@@ -12,6 +12,7 @@ import {
   GRID_BOTTOM,
   GRID_LEADING,
   GRID_TOP,
+  EXPORT_SCALE,
   normalizeColor,
   slugify,
 } from "./export";
@@ -49,6 +50,15 @@ describe("slugify", () => {
     expect(slugify("Marka Adi!")).toBe("marka-adi");
     expect(slugify("  ")).toBe("instagram-grid");
     expect(slugify("")).toBe("instagram-grid");
+  });
+});
+
+describe("300 DPI A4 raster", () => {
+  it("A4 point ölçülerini değiştirmeden 2480×3508 piksele ölçekler", () => {
+    expect(Math.round(A4_W * EXPORT_SCALE)).toBe(2480);
+    expect(Math.round(A4_H * EXPORT_SCALE)).toBe(3508);
+    expect(A4_W).toBe(595.28);
+    expect(A4_H).toBe(841.89);
   });
 });
 
