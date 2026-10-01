@@ -59,26 +59,29 @@ export default function ExistingPostList({
     <section>
       <div className="mb-4 grid gap-2">
         <label className="text-sm text-neutral-600" htmlFor="recency-select">Yeni görsel konumu</label>
-        <div className="flex gap-2">
+        <div className="grid gap-2">
         <select
           id="recency-select"
           value={recency}
           onChange={(e) =>
             setRecency(e.target.value as "enYeni" | "enEski")
           }
-          className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-sky-700"
+          className="h-9 w-full rounded-lg border border-black/10 bg-white px-2.5 text-sm outline-none focus:border-sky-700"
         >
           <option value="enYeni">En yeni (gridin en üstü)</option>
           <option value="enEski">En eski (listeye ekle)</option>
         </select>
-        <select aria-label="İçerik türü" value={postType} onChange={(e) => setPostType(e.target.value as PostType)} className="min-w-0 rounded-lg border border-black/10 bg-white px-2 py-2 text-sm">
-          <option value="post">Post</option><option value="reel">Reel</option><option value="carousel">Carousel</option>
+        <div className="flex items-center gap-2">
+        <select aria-label="İçerik türü" value={postType} onChange={(e) => setPostType(e.target.value as PostType)} className="h-9 min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 text-sm focus:border-sky-700">
+          <option value="post">Post</option>
+          <option value="reel">Reel</option>
+          <option value="carousel">Carousel</option>
         </select>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={busy}
-          className="h-9 shrink-0 rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          className="inline-flex h-9 shrink-0 items-center rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
         >
           {busy ? "Yükleniyor…" : "Görsel yükle"}
         </button>
@@ -89,6 +92,7 @@ export default function ExistingPostList({
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
+        </div>
         </div>
       </div>
       {error ? (
