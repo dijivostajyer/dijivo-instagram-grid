@@ -7,7 +7,7 @@ import { MAX_VIDEO_BYTES, loadCoverFile, loadImageFile, loadVideoFile } from "@/
 import type { ExistingPost, PostType } from "@/lib/types";
 
 /** Reel video desteği metni (doğrulama limitiyle aynı kaynak, §3). */
-const REEL_HINT = `MP4 veya WebM · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB`;
+const REEL_HINT = `MP4 veya WebM · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB · Tek video`;
 
 /**
  * Mevcut gönderi yönetimi: görsel yükleme, yayın sırası kontrolü
@@ -74,19 +74,33 @@ export default function ExistingPostList({
     setPendingVideo(null);
   }
 
-  async function handleFile(file: File | undefined) {
-    if (!file) return;
+  /**
+   * Çoklu görsel yükleme: her dosya ayrı içerik oluşturur.
+   * Bir dosya geçersizse diğer dosyalar yüklenmeye devam eder;
+   * başarısız dosyalar `dosya adı: sebep` biçiminde raporlanır.
+   * "enYeni" sıfıra eklediği için seçim sırasının korunması
+   * üzere batch ters sırada işlenir; "enEski" sona ekler,
+   * doğrudan sıra korunur.
+   */
+  async function handleFiles(files: FileList | null) {
+    if (!files?.length) return;
     setError(null);
     setBusy(true);
-    try {
-      const { url, alt, aspectRatio } = await loadImageFile(file);
-      onUpload({ url, alt, recency, postType, aspectRatio });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Görsel yüklenemedi.");
-    } finally {
-      setBusy(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+    const failures: string[] = [];
+    const batch = recency === "enYeni" ? Array.from(files).reverse() : Array.from(files);
+    for (const file of batch) {
+      try {
+        const { url, alt, aspectRatio } = await loadImageFile(file);
+        onUpload({ url, alt, recency, postType, aspectRatio });
+      } catch (e) {
+        failures.push(`${file.name}: ${e instanceof Error ? e.message : "Görsel yüklenemedi."}`);
+      }
     }
+    if (failures.length) {
+      setError(failures.join(" "));
+    }
+    setBusy(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleCoverFile(file: File | undefined) {
@@ -168,10 +182,16 @@ export default function ExistingPostList({
           ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
+          multiple
           className="hidden"
-          onChange={(e) => void handleFile(e.target.files?.[0])}
+          onChange={(e) => void handleFiles(e.target.files)}
         />
         </div>
+        {postType === "reel" ? null : (
+          <p className="text-xs text-neutral-400">
+            Birden fazla JPG, PNG veya WebP seçebilirsiniz.
+          </p>
+        )}
         </div>
         {postType === "reel" ? (
           <div className="rounded-xl border border-black/10 p-3">

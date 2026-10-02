@@ -35,7 +35,6 @@ export default function MonthlyProjects({
   projects,
   activeProjectId,
   shareLink,
-  onSelect,
   onOpen,
   onCreate,
 }: {
@@ -43,9 +42,7 @@ export default function MonthlyProjects({
   activeProjectId: string;
   /** Oluşturulan son paylaşım bağlantısı; aktif kartta durum göstergesi. */
   shareLink: string | null;
-  /** Projeyi aktif yapar (sayfada kalır). */
-  onSelect: (id: string) => void;
-  /** Projeyi aktif yapar ve planner'a götürür. */
+  /** Projeyi aktif yapar ve planner'a götürür (Planı Aç). */
   onOpen: (id: string) => void;
   onCreate: (name: string, month: number, year: number, copyPrevious: boolean) => string | null;
 }) {
@@ -221,7 +218,6 @@ export default function MonthlyProjects({
                               : null
                           }
                           shareLink={shareLink}
-                          onSelect={() => onSelect(project.id)}
                           onOpen={() => onOpen(project.id)}
                         />
                       ))}
@@ -276,14 +272,12 @@ function PlanCard({
   isActive,
   shareStatus,
   shareLink,
-  onSelect,
   onOpen,
 }: {
   project: GridProject;
   isActive: boolean;
   shareStatus: "ready" | "none" | null;
   shareLink: string | null;
-  onSelect: () => void;
   onOpen: () => void;
 }) {
   const stats = computePlanStats(project.existingPosts, project.plannedPosts);
@@ -362,19 +356,11 @@ function PlanCard({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={onSelect}
+            onClick={onOpen}
             aria-label={`Planı Aç: ${project.name}`}
-            className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+            className="inline-flex h-9 items-center rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
           >
             Planı Aç
-          </button>
-          <button
-            type="button"
-            onClick={onOpen}
-            aria-label={`Grid Planner: ${project.name}`}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
-          >
-            Grid Planner
           </button>
         </div>
       </div>
