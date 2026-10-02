@@ -29,3 +29,163 @@ textarea {
   -webkit-tap-highlight-color: transparent;
   font: inherit;
 }
+
+/* ── Takvim / Planlama modülü mikro animasyonlar ─────────────────
+   Performans: yalnızca transform + opacity kullanılır (GPU tabanlı);
+   layout tetikleyen özellikler (width/height/top) kullanılmaz. */
+
+/* Ay geçişi: fade + hafif horizontal slide (§6). */
+@keyframes calendar-enter {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-calendar-enter {
+  animation: calendar-enter 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Yeni kayıt eklendiğinde enter (§6). */
+@keyframes calendar-item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-calendar-item-enter {
+  animation: calendar-item-enter 200ms ease-out both;
+}
+
+/* Bugün hücresi: çok hafif pulse / glow (§5/§6). */
+@keyframes today-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.55), 0 0 0 0 rgba(14, 165, 233, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.55), 0 0 0 5px rgba(14, 165, 233, 0);
+  }
+}
+.animate-today-glow {
+  animation: today-glow 3.2s ease-in-out infinite;
+}
+
+/* Kart hover elevation (§6). */
+.calendar-card {
+  transition:
+    box-shadow 160ms ease,
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease;
+}
+.calendar-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -2px rgb(15 23 42 / 0.12), 0 1px 3px -1px rgb(15 23 42 / 0.08);
+}
+
+/* Drawer / modal açılış: slide + fade (§6). */
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-drawer-in {
+  animation: drawer-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-dialog-in {
+  animation: dialog-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Bildirim/toast enter (§6). */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-toast-in {
+  animation: toast-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Bildirim merkezi paneli (§6). */
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-popover-in {
+  animation: popover-in 180ms ease-out both;
+}
+
+/* DnD sürükleme placeholder'ı (§6). */
+@keyframes drop-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.animate-drop-pulse {
+  animation: drop-pulse 1.1s ease-in-out infinite;
+}
+
+/* Durum değişimi geçişi (§6) — badge/dot yumuşak renk geçişi. */
+.status-badge {
+  transition:
+    background-color 200ms ease,
+    color 200ms ease,
+    border-color 200ms ease;
+}
+
+/* Tercih azaltma: tüm takvim animasyonları devre dışı (§35). */
+@media (prefers-reduced-motion: reduce) {
+  .animate-calendar-enter,
+  .animate-calendar-item-enter,
+  .animate-today-glow,
+  .animate-drawer-in,
+  .animate-dialog-in,
+  .animate-toast-in,
+  .animate-popover-in,
+  .animate-drop-pulse {
+    animation: none;
+  }
+  .calendar-card:hover {
+    transform: none;
+  }
+}

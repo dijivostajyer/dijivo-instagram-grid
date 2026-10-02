@@ -3,6 +3,7 @@
 import {
   ArrowDownTrayIcon,
   CalendarDaysIcon,
+  CalendarIcon,
   Cog6ToothIcon,
   HomeIcon,
   IdentificationIcon,
@@ -16,6 +17,7 @@ export type AppView =
   | "brands"
   | "overview"
   | "plans"
+  | "calendar"
   | "planner"
   | "profile"
   | "share"
@@ -30,6 +32,7 @@ const NAV_ITEMS: Array<{
   { view: "brands", label: "Markalar", icon: IdentificationIcon },
   { view: "overview", label: "Genel Bakış", icon: HomeIcon },
   { view: "plans", label: "Aylık Planlar", icon: CalendarDaysIcon },
+  { view: "calendar", label: "Takvim", icon: CalendarIcon },
   { view: "planner", label: "Grid Planner", icon: Squares2X2Icon },
   { view: "profile", label: "Marka Profili", icon: UserCircleIcon },
   { view: "share", label: "Paylaşım", icon: ShareIcon },
@@ -41,6 +44,7 @@ export const VIEW_TITLES: Record<AppView, string> = {
   brands: "Markalar",
   overview: "Genel Bakış",
   plans: "Aylık Planlar",
+  calendar: "Takvim",
   planner: "Grid Planner",
   profile: "Marka Profili",
   share: "Paylaşım",

@@ -51,8 +51,10 @@ export interface GridProject {
   createdAt: string;
   updatedAt: string;
   brand: Brand;
-  /** v3: bu projenin ait olduğu marka (brands[] içindeki id). */
-  brandId?: string;
+  /** v3: bu projenin ait olduğu marka (brands[] içindeki id).
+   * Kalıtsal JSON verilerinde `null` da görülebilir; okuma tarafı her zaman
+   * falsy-kontrolü ile ele alır. */
+  brandId?: string | null;
   existingPosts: ExistingPost[];
   plannedPosts: PlannedPost[];
 }
