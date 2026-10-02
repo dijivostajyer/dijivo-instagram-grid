@@ -92,6 +92,10 @@ function isPostType(value: unknown): value is PostType {
   return value === undefined || value === "post" || value === "reel" || value === "carousel";
 }
 
+function isMediaType(value: unknown): value is "image" | "video" {
+  return value === undefined || value === "image" || value === "video";
+}
+
 function isBrand(value: unknown): value is Brand {
   if (!isRecord(value)) return false;
   return (
@@ -125,6 +129,9 @@ function isExistingPost(value: unknown): value is ExistingPost {
     isAspectRatio(value.aspectRatio) &&
     isPostType(value.postType) &&
     isOptionalString(value.caption) &&
+    isMediaType(value.mediaType) &&
+    isOptionalString(value.videoUrl) &&
+    isOptionalString(value.coverImageUrl) &&
     typeof value.recencyIndex === "number" &&
     typeof value.pinned === "boolean" &&
     (value.pinnedOrder === undefined || typeof value.pinnedOrder === "number")
@@ -141,6 +148,9 @@ function isPlannedPost(value: unknown): value is PlannedPost {
     isAspectRatio(value.aspectRatio) &&
     isPostType(value.postType) &&
     isOptionalString(value.caption) &&
+    isMediaType(value.mediaType) &&
+    isOptionalString(value.videoUrl) &&
+    isOptionalString(value.coverImageUrl) &&
     typeof value.planOrder === "number"
   );
 }
@@ -373,18 +383,29 @@ export function toPersistableState(
   });
   const profileImageUrl = resolveUrl(state.brand.profileImageUrl);
 
+  // Phase 2 (§4/§9): reel video ve kapak URL'leri de blob: ise
+  // düşülür; video referansları (idb-video:) aynen korunur.
+  const persistPost = <T extends ExistingPost | PlannedPost>(post: T): T | null => {
+    const imageUrl = resolveUrl(post.imageUrl);
+    if (imageUrl === undefined) return null;
+    return {
+      ...post,
+      imageUrl,
+      videoUrl: resolveUrl(post.videoUrl),
+      coverImageUrl: resolveUrl(post.coverImageUrl),
+    };
+  };
+
   const existingPosts: ExistingPost[] = [];
   for (const post of state.existingPosts) {
-    const imageUrl = resolveUrl(post.imageUrl);
-    if (imageUrl === undefined) continue;
-    existingPosts.push({ ...post, imageUrl });
+    const persisted = persistPost(post);
+    if (persisted !== null) existingPosts.push(persisted);
   }
 
   const plannedPosts: PlannedPost[] = [];
   for (const post of state.plannedPosts) {
-    const imageUrl = resolveUrl(post.imageUrl);
-    if (imageUrl === undefined) continue;
-    plannedPosts.push({ ...post, imageUrl });
+    const persisted = persistPost(post);
+    if (persisted !== null) plannedPosts.push(persisted);
   }
 
   return {
@@ -392,7 +413,7 @@ export function toPersistableState(
     brand: { ...persistBrand(state.brand), profileImageUrl },
     existingPosts,
     plannedPosts,
-    projects: state.projects?.map((project) => ({ ...project, brand: persistBrand(project.brand), existingPosts: project.existingPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is ExistingPost => post.imageUrl !== undefined), plannedPosts: project.plannedPosts.map((post) => ({ ...post, imageUrl: resolveUrl(post.imageUrl) })).filter((post): post is PlannedPost => post.imageUrl !== undefined) })),
+    projects: state.projects?.map((project) => ({ ...project, brand: persistBrand(project.brand), existingPosts: project.existingPosts.map(persistPost).filter((post): post is ExistingPost => post !== null), plannedPosts: project.plannedPosts.map(persistPost).filter((post): post is PlannedPost => post !== null) })),
     activeProjectId: state.activeProjectId,
     brands: state.brands?.map(persistBrand),
     activeBrandId: state.activeBrandId,

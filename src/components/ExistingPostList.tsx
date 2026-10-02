@@ -3,8 +3,11 @@
 import { useRef, useState } from "react";
 
 import { filterByType, type TypeFilter } from "@/lib/plan-stats";
-import { loadImageFile } from "@/lib/validators";
+import { MAX_VIDEO_BYTES, loadCoverFile, loadImageFile, loadVideoFile } from "@/lib/validators";
 import type { ExistingPost, PostType } from "@/lib/types";
+
+/** Reel video desteği metni (doğrulama limitiyle aynı kaynak, §3). */
+const REEL_HINT = `MP4 veya WebM · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB`;
 
 /**
  * Mevcut gönderi yönetimi: görsel yükleme, yayın sırası kontrolü
@@ -36,6 +39,12 @@ export default function ExistingPostList({
     recency: "enYeni" | "enEski";
     postType: PostType;
     aspectRatio: "1:1" | "3:4" | "4:3" | "16:9";
+    /** Reel medya türü (Phase 2, §3); tanımsız = görsel gönderi. */
+    mediaType?: "image" | "video";
+    /** Reel videosu URL'si (mediaType: "video" ise). */
+    videoUrl?: string;
+    /** Reel kapak görseli URL'si. */
+    coverImageUrl?: string;
   }) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string, pinned: boolean) => void;
@@ -49,11 +58,21 @@ export default function ExistingPostList({
   onToggleSelect?: (id: string) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const [recency, setRecency] = useState<"enYeni" | "enEski">("enYeni");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [postType, setPostType] = useState<PostType>("post");
+  // §3: Reel seçildiğinde kapak + video akışı (kapak isteğe bağlı). */
+  const [pendingCover, setPendingCover] = useState<{ url: string; alt: string } | null>(null);
+  const [pendingVideo, setPendingVideo] = useState<{ url: string; name: string } | null>(null);
   const visiblePosts = filterByType(posts, typeFilter);
+
+  function resetReelDraft() {
+    setPendingCover(null);
+    setPendingVideo(null);
+  }
 
   async function handleFile(file: File | undefined) {
     if (!file) return;
@@ -68,6 +87,49 @@ export default function ExistingPostList({
       setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  async function handleCoverFile(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const { url, alt } = await loadCoverFile(file);
+      setPendingCover({ url, alt });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Kapak görseli yüklenemedi.");
+    } finally {
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    }
+  }
+
+  async function handleVideoFile(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const { url } = await loadVideoFile(file);
+      setPendingVideo({ url, name: file.name });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Video yüklenemedi.");
+    } finally {
+      if (videoInputRef.current) videoInputRef.current.value = "";
+    }
+  }
+
+  function handleAddReel() {
+    if (!pendingVideo) return;
+    onUpload({
+      // Reel'de grid görseli = kapak varsa kapak, yoksa video
+      // referansı olarak ana görsel (grid hücresi cover'ı gösterir).
+      url: pendingCover ? pendingCover.url : pendingVideo.url,
+      alt: pendingCover ? pendingCover.alt : pendingVideo.name,
+      recency,
+      postType: "reel",
+      aspectRatio: "1:1",
+      mediaType: "video",
+      videoUrl: pendingVideo.url,
+      coverImageUrl: pendingCover ? pendingCover.url : undefined,
+    });
+    resetReelDraft();
   }
 
   return (
@@ -87,11 +149,12 @@ export default function ExistingPostList({
           <option value="enEski">En eski (listeye ekle)</option>
         </select>
         <div className="flex items-center gap-2">
-        <select aria-label="İçerik türü" value={postType} onChange={(e) => setPostType(e.target.value as PostType)} className="h-9 min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 text-sm focus:border-sky-700">
+        <select aria-label="İçerik türü" value={postType} onChange={(e) => { setPostType(e.target.value as PostType); resetReelDraft(); }} className="h-9 min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 text-sm focus:border-sky-700">
           <option value="post">Post</option>
           <option value="reel">Reel</option>
           <option value="carousel">Carousel</option>
         </select>
+        {postType === "reel" ? null : (
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -100,15 +163,70 @@ export default function ExistingPostList({
         >
           {busy ? "Yükleniyor…" : "Görsel yükle"}
         </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
           className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          onChange={(e) => void handleFile(e.target.files?.[0])}
         />
         </div>
         </div>
+        {postType === "reel" ? (
+          <div className="rounded-xl border border-black/10 p-3">
+            <p className="mb-2 text-xs font-medium text-neutral-500">{REEL_HINT}</p>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => coverInputRef.current?.click()}
+                className="inline-flex h-8 items-center rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+              >
+                {pendingCover ? "Kapak değiştir" : "Kapak görseli yükle"}
+              </button>
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                className="inline-flex h-8 items-center rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+              >
+                {pendingVideo ? "Videoyu değiştir" : "Video dosyası yükle"}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {pendingCover ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={pendingCover.url} alt="Reel kapak önizlemesi" className="size-12 rounded-lg object-cover outline-1 -outline-offset-1 outline-black/10" />
+              ) : null}
+              {pendingVideo ? (
+                <span className="max-w-40 truncate rounded-lg bg-neutral-100 px-2 py-1 text-xs text-neutral-600">
+                  {pendingVideo.name}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleAddReel}
+                disabled={!pendingVideo}
+                className="inline-flex h-8 items-center rounded-lg bg-neutral-900 px-3 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Reel ekle
+              </button>
+            </div>
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => void handleCoverFile(e.target.files?.[0])}
+            />
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/mp4,video/webm"
+              className="hidden"
+              onChange={(e) => void handleVideoFile(e.target.files?.[0])}
+            />
+          </div>
+        ) : null}
       </div>
       {error ? (
         <p role="alert" className="mb-3 text-sm font-medium text-red-700">

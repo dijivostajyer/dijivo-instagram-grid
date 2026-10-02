@@ -2,6 +2,8 @@ export interface ShareStorageConfig {
   url: string;
   secretKey: string;
   bucket: string;
+  /** Phase 2 (§9): reel videoları için ayrı private bucket. */
+  mediaBucket: string;
   ttlDays: number;
 }
 
@@ -24,5 +26,5 @@ export function getShareStorageConfig(env: NodeJS.ProcessEnv = process.env): Sha
   if (!Number.isInteger(ttl) || ttl <= 0) {
     throw new Error("SHARE_TTL_DAYS pozitif bir tam sayı olmalı.");
   }
-  return { url, secretKey, bucket: env.SUPABASE_SHARE_BUCKET ?? "share-images", ttlDays: ttl };
+  return { url, secretKey, bucket: env.SUPABASE_SHARE_BUCKET ?? "share-images", mediaBucket: env.SUPABASE_SHARE_MEDIA_BUCKET ?? "share-media", ttlDays: ttl };
 }

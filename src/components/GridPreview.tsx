@@ -44,6 +44,12 @@ function GridCellView({
   selected?: boolean;
 }) {
   const { post, pinned } = cell;
+  // Reel: kapak görseli varsa onu göster; yoksa ana görsel
+  // (güvenli fallback — eski reel kayıtları bozulmaz, §4).
+  const mediaSrc =
+    post.mediaType === "video" && post.coverImageUrl
+      ? post.coverImageUrl
+      : post.imageUrl;
   const [status, setStatus] = useState<"loading" | "loaded" | "error">(
     "loading",
   );
@@ -91,7 +97,7 @@ function GridCellView({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}
-        src={post.imageUrl}
+        src={mediaSrc}
         alt={post.alt ?? "Gönderi görseli"}
         className={`h-full w-full object-cover transition-opacity duration-200 ${
           status === "loaded" ? "opacity-100" : "opacity-0"

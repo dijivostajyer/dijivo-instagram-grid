@@ -10,6 +10,13 @@ import {
   persistObjectUrl,
 } from "../lib/image-store";
 import {
+  clearStoredVideos,
+  deleteStoredVideo,
+  isVideoRef,
+  loadVideoAsObjectUrl,
+  persistVideoObjectUrl,
+} from "../lib/video-store";
+import {
   cleanUpRemovedImages,
   revokeTrackedObjectUrls,
 } from "../lib/image-lifecycle";
@@ -65,11 +72,21 @@ export async function hydrateState(
   refByObjectUrl: Map<string, string>,
   trackedObjectUrls: Set<string>,
 ): Promise<PersistedAppState> {
+  // `idb:` görsel ve `idb-video:` video referanslarını tek haritada
+  // çözer: aynı object URL iki farklı kalıcı katmana eşleyebilir.
   const resolve = async (value: string | undefined): Promise<string | undefined> => {
-    if (value === undefined || !isImageRef(value)) return value;
+    if (value === undefined) return value;
     for (const [objectUrl, ref] of refByObjectUrl) {
       if (ref === value) return objectUrl;
     }
+    if (isVideoRef(value)) {
+      const objectUrl = await loadVideoAsObjectUrl(value);
+      if (objectUrl === null) return undefined;
+      refByObjectUrl.set(objectUrl, value);
+      trackedObjectUrls.add(objectUrl);
+      return objectUrl;
+    }
+    if (!isImageRef(value)) return value;
     const objectUrl = await loadImageAsObjectUrl(value);
     if (objectUrl === null) return undefined;
     refByObjectUrl.set(objectUrl, value);
@@ -87,31 +104,50 @@ export async function hydrateState(
   });
   const hydratedBrand = await hydrateBrand(state.brand);
 
+  /**
+   * Tek gönderinin görsel/video/kapak referanslarını çözer.
+   * Görseli çözülemeyen gönderi `null` döner (listeden düşer);
+   * video/kapak referansı çözülemeyen reel ise ilgili alanları
+   * temizler — geçersiz `idb:`/`idb-video:` URL'leriyle çalışılmaz
+   * ve eski reel kayıtları video olmadan açılabilir (§4/§5).
+   */
+  const hydratePost = async <T extends ExistingPost | PlannedPost>(
+    post: T,
+  ): Promise<T | null> => {
+    const imageUrl = await resolve(post.imageUrl);
+    if (imageUrl === undefined) return null;
+    const videoUrl = await resolve(post.videoUrl);
+    const coverImageUrl = await resolve(post.coverImageUrl);
+    const hydrated = { ...post, imageUrl } as T;
+    const media = hydrated as ExistingPost;
+    if (videoUrl !== undefined) media.videoUrl = videoUrl;
+    else if (post.videoUrl !== undefined) delete media.videoUrl;
+    if (coverImageUrl !== undefined) media.coverImageUrl = coverImageUrl;
+    else if (post.coverImageUrl !== undefined) delete media.coverImageUrl;
+    return hydrated;
+  };
+
   const existingPosts: ExistingPost[] = [];
   for (const post of state.existingPosts) {
-    const imageUrl = await resolve(post.imageUrl);
-    if (imageUrl === undefined) continue;
-    existingPosts.push({ ...post, imageUrl });
+    const hydrated = await hydratePost(post);
+    if (hydrated !== null) existingPosts.push(hydrated);
   }
 
   const plannedPosts: PlannedPost[] = [];
   for (const post of state.plannedPosts) {
-    const imageUrl = await resolve(post.imageUrl);
-    if (imageUrl === undefined) continue;
-    plannedPosts.push({ ...post, imageUrl });
+    const hydrated = await hydratePost(post);
+    if (hydrated !== null) plannedPosts.push(hydrated);
   }
 
   const projects = await Promise.all((state.projects ?? []).map(async (project) => ({
     ...project,
     brand: await hydrateBrand(project.brand),
-    existingPosts: (await Promise.all(project.existingPosts.map(async (post) => {
-      const imageUrl = await resolve(post.imageUrl);
-      return imageUrl === undefined ? null : { ...post, imageUrl };
-    }))).filter((post): post is ExistingPost => post !== null),
-    plannedPosts: (await Promise.all(project.plannedPosts.map(async (post) => {
-      const imageUrl = await resolve(post.imageUrl);
-      return imageUrl === undefined ? null : { ...post, imageUrl };
-    }))).filter((post): post is PlannedPost => post !== null),
+    existingPosts: (await Promise.all(project.existingPosts.map((post) => hydratePost(post)))).filter(
+      (post): post is ExistingPost => post !== null,
+    ),
+    plannedPosts: (await Promise.all(project.plannedPosts.map((post) => hydratePost(post)))).filter(
+      (post): post is PlannedPost => post !== null,
+    ),
   })));
   const hydrated = {
     version: STORAGE_VERSION,
@@ -147,6 +183,11 @@ export interface PersistedGrid {
   setPlannedPosts: (next: PlannedPost[] | ((prev: PlannedPost[]) => PlannedPost[])) => void;
   /** Object URL'i IndexedDB'ye kalıcılaştırır (yükleme akışlarında çağrılır). */
   persistUpload: (objectUrl: string) => Promise<void>;
+  /**
+   * Video object URL'ini ayrı IndexedDB katmanına kalıcılaştırır;
+   * metaveride `idb-video:<id>` referansı üretir (Phase 2, §9).
+   */
+  persistVideoUpload: (objectUrl: string) => Promise<void>;
   /** Kalıcı veriyi siler ve temiz workspace'a (onboarding) döner. */
   resetToDefaults: () => Promise<void>;
   /** Aktif markaya ait projeler (sıkı marka izolasyonu, §5). */
@@ -262,6 +303,28 @@ export function usePersistedGrid(): PersistedGrid {
     }
   }, []);
 
+  // Phase 2 (§9): reel videoları görsellerden AYRı IndexedDB
+  // katmanına (video-store) yazılır; yaşam döngüsü image
+  // lifecycle sisteminden bağımsızdır.
+  const persistVideoUpload = useCallback(async (objectUrl: string) => {
+    if (!objectUrl.startsWith("blob:")) return;
+    trackedObjectUrls.current.add(objectUrl);
+    try {
+      const ref = await persistVideoObjectUrl(objectUrl);
+      if (!trackedObjectUrls.current.has(objectUrl)) {
+        await deleteStoredVideo(ref);
+        return;
+      }
+      refByObjectUrl.current.set(objectUrl, ref);
+    } catch (error) {
+      // Video kalıcılaştırılamazsa yalnızca oturumda kalır;
+      // kalıcı metaveriye `blob:` asla yazılmaz.
+      console.warn("[persistence] Video kalıcılaştırılamadı:", error);
+    } finally {
+      setUploadTick((tick) => tick + 1);
+    }
+  }, []);
+
   const updateBrand = useCallback(
     (id: string, next: Brand) => {
       const imageUrls = [next.profileImageUrl, ...(next.highlights ?? []).map((highlight) => highlight.imageUrl)];
@@ -361,6 +424,7 @@ export function usePersistedGrid(): PersistedGrid {
   const resetToDefaults = useCallback(async () => {
     clearPersistedState(getBrowserStorage());
     await clearStoredImages();
+    await clearStoredVideos();
     revokeTrackedObjectUrls({
       refByObjectUrl: refByObjectUrl.current,
       trackedObjectUrls: trackedObjectUrls.current,
@@ -421,6 +485,7 @@ export function usePersistedGrid(): PersistedGrid {
     setExistingPosts,
     setPlannedPosts,
     persistUpload,
+    persistVideoUpload,
     resetToDefaults,
     projects: (state.projects ?? []).filter(
       (project) =>

@@ -429,6 +429,9 @@ export function copyPostToProjectState(
       postType: options.postType ? sourcePost.postType : undefined,
       aspectRatio: sourcePost.aspectRatio,
       caption,
+      mediaType: sourcePost.mediaType,
+      videoUrl: sourcePost.videoUrl,
+      coverImageUrl: sourcePost.coverImageUrl,
     });
     let nextPosts = posts;
     if (options.pinned && (sourcePost as ExistingPost).pinned) {
@@ -456,6 +459,9 @@ export function copyPostToProjectState(
         postType: options.postType ? sourcePost.postType : undefined,
         aspectRatio: sourcePost.aspectRatio,
         caption,
+        mediaType: sourcePost.mediaType,
+        videoUrl: sourcePost.videoUrl,
+        coverImageUrl: sourcePost.coverImageUrl,
       });
       const projects = allProjects.map((project) =>
         project.id === target.id

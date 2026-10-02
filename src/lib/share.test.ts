@@ -4,8 +4,10 @@ import { computeGrid } from "./grid";
 import {
   createShareSnapshot,
   deserializeShareSnapshot,
+  isShareableVideoUrl,
   serializeShareSnapshot,
   shareInputFromGrid,
+  SHARE_SNAPSHOT_VERSION,
   type ShareSnapshotInput,
 } from "./share";
 import { InMemoryShareStore } from "./share-store";
@@ -127,6 +129,191 @@ describe("share snapshot", () => {
         CREATED_AT,
       ),
     ).toThrow("Paylaşılabilir grid bulunamadı.");
+  });
+});
+
+describe("share caption + reel metadata (§12/§22)", () => {
+  it("caption snapshot'ta uçtan uca korunur (§12)", () => {
+    const snapshot = createShareSnapshot(
+      input({
+        cells: [{ ...input().cells[0], caption: "Yayın başlığı #dijivo" }],
+      }),
+      TOKEN,
+      CREATED_AT,
+    );
+    const restored = deserializeShareSnapshot(
+      serializeShareSnapshot(snapshot),
+    );
+    expect(restored?.cells[0].caption).toBe("Yayın başlığı #dijivo");
+  });
+
+  it("caption'sız eski (legacy) snapshot hâlâ açılır (§12)", () => {
+    const legacy = {
+      version: SHARE_SNAPSHOT_VERSION,
+      token: TOKEN,
+      createdAt: CREATED_AT,
+      brand: { name: "Dijivo", username: "dijivo" },
+      cells: [
+        {
+          id: "post-1",
+          source: "mevcut",
+          imageUrl: "https://example.com/post-1.jpg",
+          position: 0,
+          row: 0,
+          column: 0,
+          pinned: false,
+        },
+      ],
+    };
+    const restored = deserializeShareSnapshot(JSON.stringify(legacy));
+    expect(restored).not.toBeNull();
+    expect(restored?.cells[0].caption).toBeUndefined();
+  });
+
+  it("reel video metadatası snapshot'ta korunur (§22)", () => {
+    const snapshot = createShareSnapshot(
+      input({
+        cells: [
+          {
+            ...input().cells[0],
+            postType: "reel",
+            caption: "Reel caption",
+            mediaType: "video",
+            videoUrl:
+              "storage:media/3e1a1c76-7958-4d4f-86c6-2727195fd44c/0-a1b2c3d4.mp4",
+            coverImageUrl: "https://example.com/cover.jpg",
+          },
+        ],
+      }),
+      TOKEN,
+      CREATED_AT,
+    );
+    const restored = deserializeShareSnapshot(
+      serializeShareSnapshot(snapshot),
+    );
+    expect(restored?.cells[0].postType).toBe("reel");
+    expect(restored?.cells[0].mediaType).toBe("video");
+    expect(restored?.cells[0].videoUrl).toContain("storage:media/");
+    expect(restored?.cells[0].coverImageUrl).toBe(
+      "https://example.com/cover.jpg",
+    );
+  });
+
+  it("eski görsel gönderisi (mediaType tanımsız) hâlâ paylaşılabilir", () => {
+    const snapshot = createShareSnapshot(input(), TOKEN, CREATED_AT);
+    expect(snapshot.cells[0].mediaType).toBeUndefined();
+    expect(snapshot.cells[0].postType).toBe("post");
+    expect(deserializeShareSnapshot(serializeShareSnapshot(snapshot))).not.toBeNull();
+  });
+
+  it("blob/idb-video video URL'leri snapshot'a yazılmaz", () => {
+    expect(() =>
+      createShareSnapshot(
+        input({
+          cells: [
+            { ...input().cells[0], mediaType: "video", videoUrl: "blob:https://editor.test/v.mp4" },
+          ],
+        }),
+        TOKEN,
+        CREATED_AT,
+      ),
+    ).toThrow("Paylaşılabilir grid bulunamadı.");
+    expect(() =>
+      createShareSnapshot(
+        input({
+          cells: [{ ...input().cells[0], mediaType: "video", videoUrl: "idb-video:abc" }],
+        }),
+        TOKEN,
+        CREATED_AT,
+      ),
+    ).toThrow("Paylaşılabilir grid bulunamadı.");
+  });
+
+  it("shareInputFromGrid: caption/media/video alanlarını editor'dan taşır", () => {
+    const existing: ExistingPost[] = [
+      {
+        id: "reel-1",
+        source: "mevcut",
+        imageUrl: "https://example.com/cover.jpg",
+        recencyIndex: 0,
+        pinned: false,
+        postType: "reel",
+        caption: "Reel #yayin",
+        mediaType: "video",
+        videoUrl: "idb-video:abc",
+        coverImageUrl: "https://example.com/cover.jpg",
+      },
+    ];
+    const shareInput = shareInputFromGrid(
+      BRAND,
+      computeGrid(existing, []),
+    );
+    const cell = shareInput.cells[0];
+    expect(cell.caption).toBe("Reel #yayin");
+    expect(cell.mediaType).toBe("video");
+    expect(cell.videoUrl).toBe("idb-video:abc");
+    expect(cell.coverImageUrl).toBe("https://example.com/cover.jpg");
+  });
+
+  it("readonly share modal verisi: hücre username/caption/media taşır (§22)", () => {
+    const snapshot = createShareSnapshot(
+      input({
+        cells: [
+          {
+            ...input().cells[0],
+            caption: "Modal caption #test",
+            postType: "reel",
+            mediaType: "video",
+            videoUrl:
+              "storage:media/3e1a1c76-7958-4d4f-86c6-2727195fd44c/0-a1b2c3d4.mp4",
+          },
+        ],
+      }),
+      TOKEN,
+      CREATED_AT,
+    );
+    // SharePostModal'ın tükettiği salt-okunur veri modeli.
+    expect(snapshot.brand.username).toBe("dijivo");
+    const cell = snapshot.cells[0];
+    expect(cell.caption).toBe("Modal caption #test");
+    expect(cell.imageUrl).toBe("https://example.com/post-1.jpg");
+    expect(cell.mediaType).toBe("video");
+    expect(cell.videoUrl).toMatch(/^storage:media\//);
+  });
+});
+
+describe("isShareableVideoUrl (§4/§22)", () => {
+  it("private share-media storage referansını kabul eder", () => {
+    expect(
+      isShareableVideoUrl(
+        "storage:media/3e1a1c76-7958-4d4f-86c6-2727195fd44c/0-a1b2c3d4.mp4",
+      ),
+    ).toBe(true);
+    expect(
+      isShareableVideoUrl(
+        "storage:media/3e1a1c76-7958-4d4f-86c6-2727195fd44c/0-a1b2c3d4.webm",
+      ),
+    ).toBe(true);
+  });
+
+  it("data URL ve http(s) akışını kabul eder", () => {
+    expect(isShareableVideoUrl("data:video/mp4;base64,AAAAHGZ0eXBpc29t")).toBe(true);
+    expect(isShareableVideoUrl("data:video/webm;base64,GkXFuAAA")).toBe(true);
+    expect(isShareableVideoUrl("https://cdn.example.com/reel.mp4")).toBe(true);
+    expect(isShareableVideoUrl("http://cdn.example.com/reel.webm")).toBe(true);
+  });
+
+  it("taşınamaz referansları ve image bucket yollarını reddeder", () => {
+    expect(isShareableVideoUrl("blob:https://editor.test/v.mp4")).toBe(false);
+    expect(isShareableVideoUrl("idb:video-ref")).toBe(false);
+    expect(isShareableVideoUrl("idb-video:abc")).toBe(false);
+    expect(
+      isShareableVideoUrl(
+        "storage:shares/3e1a1c76-7958-4d4f-86c6-2727195fd44c/0-a1b2c3d4.jpg",
+      ),
+    ).toBe(false);
+    expect(isShareableVideoUrl("data:image/png;base64,iVBORw0KGgo=")).toBe(false);
+    expect(isShareableVideoUrl("not-a-url")).toBe(false);
   });
 });
 

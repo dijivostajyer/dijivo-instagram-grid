@@ -1,4 +1,4 @@
-import GridPreview from "@/components/GridPreview";
+import ShareGridClient from "@/components/ShareGridClient";
 import { isValidShareToken } from "@/lib/share-token";
 import { getShareStore } from "@/lib/share-store";
 import type { GridResult } from "@/lib/types";
@@ -20,7 +20,7 @@ export default async function SharePage({
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-neutral-500">
           Salt-okunur grid paylaşımı
         </p>
-        <GridPreview
+        <ShareGridClient
           brand={{ id: "shared-brand", ...snapshot.brand }}
           result={gridResultFromSnapshot(snapshot.cells)}
         />
@@ -43,6 +43,10 @@ function gridResultFromSnapshot(
     column: number;
     pinned: boolean;
     postType?: "post" | "reel" | "carousel";
+    caption?: string;
+    mediaType?: "image" | "video";
+    videoUrl?: string;
+    coverImageUrl?: string;
   }>,
 ): GridResult {
   const ordered = [...cells].sort((a, b) => a.position - b.position);
@@ -62,6 +66,10 @@ function gridResultFromSnapshot(
               recencyIndex: cell.position,
               pinned: cell.pinned,
               postType: cell.postType ?? "post",
+              caption: cell.caption,
+              mediaType: cell.mediaType,
+              videoUrl: cell.videoUrl,
+              coverImageUrl: cell.coverImageUrl,
             }
           : {
               id: cell.id,
@@ -70,6 +78,10 @@ function gridResultFromSnapshot(
               alt: cell.alt,
               planOrder: cell.position,
               postType: cell.postType ?? "post",
+              caption: cell.caption,
+              mediaType: cell.mediaType,
+              videoUrl: cell.videoUrl,
+              coverImageUrl: cell.coverImageUrl,
             },
     })),
     rowCount: Math.ceil(ordered.length / 3),

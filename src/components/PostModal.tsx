@@ -19,7 +19,15 @@ import {
   type NewBrandInput,
 } from "@/hooks/use-persisted-grid";
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
-import { loadImageFile } from "@/lib/validators";
+import {
+  MAX_VIDEO_BYTES,
+  loadCoverFile,
+  loadImageFile,
+  loadVideoFile,
+} from "@/lib/validators";
+
+/** Reel video desteği metni (doğrulama limitiyle aynı kaynak). */
+const REEL_HINT = `MP4 veya WebM · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB`;
 import type { GridProject } from "@/lib/storage";
 import type {
   Brand,
@@ -48,6 +56,8 @@ export default function PostModal({
   onMovePinned,
   onDelete,
   onChangeImage,
+  onChangeVideo,
+  onChangeCover,
   onCopy,
   onClose,
 }: {
@@ -65,6 +75,10 @@ export default function PostModal({
   onMovePinned?: (direction: -1 | 1) => void;
   onDelete?: () => void;
   onChangeImage: (url: string) => Promise<void>;
+  /** §7: Reel videosu değiştir (GridManager video-store'a kalıcılaştırır). */
+  onChangeVideo?: (url: string) => Promise<void>;
+  /** §7: Reel kapak görseli değiştir. */
+  onChangeCover?: (url: string) => Promise<void>;
   onCopy: (targetProjectId: string, options: PostCopyOptions) => string | null;
   onClose: () => void;
 }) {
@@ -82,11 +96,70 @@ export default function PostModal({
   const [imageError, setImageError] = useState<string | null>(null);
   const [theme, toggleTheme] = useInstagramPreviewTheme();
   const dark = theme === "dark";
+  // §7: Reel durumu — video varsa modal video önizlemesi açar.
+  const isReel = post.mediaType === "video" && Boolean(post.videoUrl);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const [videoBusy, setVideoBusy] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+
+  // §7/§11: modal kapanınca video playback durur, timeline sıfırlanır.
+  function stopVideo() {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+  }
+
+  function handleClose() {
+    stopVideo();
+    onClose();
+  }
+
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) videoRef.current.pause();
+    };
+  }, []);
+
+  async function handleVideoChange(files: FileList | null) {
+    if (!files?.length) return;
+    setMediaError(null);
+    setVideoBusy(true);
+    try {
+      const { url } = await loadVideoFile(files[0]);
+      await onChangeVideo?.(url);
+    } catch (e) {
+      setMediaError(e instanceof Error ? e.message : "Video değiştirilemedi.");
+    } finally {
+      setVideoBusy(false);
+      if (videoInputRef.current) videoInputRef.current.value = "";
+    }
+  }
+
+  async function handleCoverChange(files: FileList | null) {
+    if (!files?.length) return;
+    setMediaError(null);
+    setVideoBusy(true);
+    try {
+      const { url } = await loadCoverFile(files[0]);
+      await onChangeCover?.(url);
+    } catch (e) {
+      setMediaError(e instanceof Error ? e.message : "Kapak değiştirilemedi.");
+    } finally {
+      setVideoBusy(false);
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    }
+  }
 
   useEffect(() => {
     closeRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        stopVideo();
+        onClose();
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
@@ -165,7 +238,7 @@ export default function PostModal({
     >
       <div
         className="fixed inset-0 bg-black/50"
-        onClick={onClose}
+        onClick={handleClose}
         aria-hidden="true"
       />
       <div className="relative my-6 grid w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl lg:grid-cols-2">
@@ -211,14 +284,30 @@ export default function PostModal({
             </div>
           </div>
 
-          <div className="relative aspect-square w-full bg-neutral-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={post.imageUrl}
-              alt={title}
-              className="absolute inset-0 size-full object-cover"
-            />
-          </div>
+          {isReel && post.videoUrl ? (
+            <div className="relative aspect-square w-full bg-black">
+              {/* §7: autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
+              <video
+                key={post.videoUrl}
+                ref={videoRef}
+                src={post.videoUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="absolute inset-0 size-full object-contain"
+                aria-label="Reel video önizlemesi"
+              />
+            </div>
+          ) : (
+            <div className="relative aspect-square w-full bg-neutral-100">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={post.imageUrl}
+                alt={title}
+                className="absolute inset-0 size-full object-cover"
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-3 px-4 pt-3">
             <HeartIcon className="size-6" aria-hidden="true" />
@@ -254,12 +343,11 @@ export default function PostModal({
               <p className={`mt-0.5 text-sm ${darkMuted}`}>
                 @{brand.username}
               </p>
-            </div>
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={onClose}
-              aria-label="Kapat"
+            </div>            <button
+                ref={closeRef}
+                type="button"
+                onClick={handleClose}
+                aria-label="Kapat"
               className="grid size-9 shrink-0 place-items-center rounded-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
             >
               <XMarkIcon className="size-5" aria-hidden="true" />
@@ -267,38 +355,85 @@ export default function PostModal({
           </div>
 
           <div className="space-y-5">
-            {/* Görsel */}
+            {/* Görsel / Reel (§7) */}
             <div>
               <span className={`mb-1.5 block text-xs font-medium ${darkMuted}`}>
-                Görsel
+                {isReel ? "Reel" : "Görsel"}
               </span>
               <div className="flex items-center gap-3">
-                <div className="size-16 shrink-0 overflow-hidden rounded-lg outline-1 -outline-offset-1 outline-black/10">
+                <div className="size-16 shrink-0 overflow-hidden rounded-lg bg-neutral-100 outline-1 -outline-offset-1 outline-black/10">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={post.imageUrl}
+                    src={isReel ? (post.coverImageUrl ?? post.imageUrl) : post.imageUrl}
                     alt={title}
                     className="size-full object-cover"
                   />
                 </div>
                 <div>
-                  <button
-                    type="button"
-                    onClick={() => imageInputRef.current?.click()}
-                    disabled={imageBusy}
-                    className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
-                  >
-                    {imageBusy ? "Yükleniyor…" : "Görseli değiştir"}
-                  </button>
-                  <input
-                    ref={imageInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="hidden"
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      void handleImageChange(event.target.files)
-                    }
-                  />
+                  {isReel ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => videoInputRef.current?.click()}
+                        disabled={videoBusy}
+                        className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                      >
+                        {videoBusy ? "Yükleniyor…" : "Videoyu değiştir"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => coverInputRef.current?.click()}
+                        disabled={videoBusy}
+                        className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                      >
+                        Kapak değiştir
+                      </button>
+                      <span className="text-xs text-neutral-500">{REEL_HINT}</span>
+                      <input
+                        ref={videoInputRef}
+                        type="file"
+                        accept="video/mp4,video/webm"
+                        className="hidden"
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          void handleVideoChange(event.target.files)
+                        }
+                      />
+                      <input
+                        ref={coverInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          void handleCoverChange(event.target.files)
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => imageInputRef.current?.click()}
+                        disabled={imageBusy}
+                        className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                      >
+                        {imageBusy ? "Yükleniyor…" : "Görseli değiştir"}
+                      </button>
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                          void handleImageChange(event.target.files)
+                        }
+                      />
+                    </>
+                  )}
+                  {mediaError ? (
+                    <p role="alert" className="mt-1 text-xs font-medium text-red-600">
+                      {mediaError}
+                    </p>
+                  ) : null}
                   {imageError ? (
                     <p role="alert" className="mt-1 text-xs font-medium text-red-600">
                       {imageError}

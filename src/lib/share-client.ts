@@ -23,6 +23,18 @@ async function imageUrlForShare(url: string, fetchImage: typeof fetch): Promise<
   return `data:${blob.type};base64,${base64FromBytes(new Uint8Array(await blob.arrayBuffer()))}`;
 }
 
+/** Reel video/blob URL'lerini taşınabilir data URL'e çevirir (Phase 2, §4/§10). */
+async function videoUrlForShare(url: string | undefined, fetchImage: typeof fetch): Promise<string | undefined> {
+  if (url === undefined || !url.startsWith("blob:")) return url;
+  const response = await fetchImage(url);
+  if (!response.ok) throw new Error("Yüklenen video paylaşım için okunamadı.");
+  const blob = await response.blob();
+  if (!/^video\/(mp4|webm)$/.test(blob.type)) {
+    throw new Error("Yüklenen video paylaşım için desteklenmiyor.");
+  }
+  return `data:${blob.type};base64,${base64FromBytes(new Uint8Array(await blob.arrayBuffer()))}`;
+}
+
 /** blob URL'lerini taşınabilir data URL'e çevirir; idb/blob referansı bırakmaz. */
 export async function prepareShareInput(
   brand: Brand,
@@ -46,6 +58,10 @@ export async function prepareShareInput(
       input.cells.map(async (cell) => ({
         ...cell,
         imageUrl: await imageUrlForShare(cell.imageUrl, fetchImage),
+        videoUrl: await videoUrlForShare(cell.videoUrl, fetchImage),
+        coverImageUrl: cell.coverImageUrl
+          ? await imageUrlForShare(cell.coverImageUrl, fetchImage)
+          : undefined,
       })),
     ),
   };

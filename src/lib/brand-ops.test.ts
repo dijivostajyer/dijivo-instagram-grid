@@ -351,6 +351,58 @@ describe("gönderi kopyalama (§16/§21)", () => {
     expect(source.existingPosts[0].caption).toBe("Merhaba dünya");
   });
 
+  it("reel kopya: mediaType/video/cover alanlarını yeni kimlikle taşır; kaynak değişmez (§20/§22)", () => {
+    const { state, projectA, projectB } = crossBrandState();
+    const reel: ExistingPost = {
+      ...existingPost("reel-a", "Reel caption"),
+      postType: "reel",
+      mediaType: "video",
+      videoUrl: "idb-video:video-1",
+      coverImageUrl: "https://cdn.example.com/reel-a-cover.jpg",
+    };
+    const next = withExistingPost(state, projectA.id, reel);
+    const result = copyPostToProjectState(next, "reel-a", projectB.id, ALL_OPTIONS);
+    if ("error" in result) throw new Error("beklenmeyen hata");
+    const copy = projectFor(result.state, projectB.id).existingPosts[0];
+    expect(copy.id).not.toBe("reel-a");
+    expect(copy.postType).toBe("reel");
+    expect(copy.mediaType).toBe("video");
+    // Aynı kalıcı video referansı taşınır: F5 sonrası iki hedefte de video çalışır (§6/§21).
+    expect(copy.videoUrl).toBe("idb-video:video-1");
+    expect(copy.coverImageUrl).toBe("https://cdn.example.com/reel-a-cover.jpg");
+    expect(copy.caption).toBe("Reel caption");
+    const source = projectFor(result.state, projectA.id);
+    expect(source.existingPosts[0].id).toBe("reel-a");
+    expect(source.existingPosts[0].videoUrl).toBe("idb-video:video-1");
+  });
+
+  it("reel lifecycle: kaynak silinince hedefin video referansı hâlâ çözülebilir (§21/§22)", () => {
+    const { state, projectA, projectB } = crossBrandState();
+    const reel: ExistingPost = {
+      ...existingPost("reel-a", "Reel"),
+      postType: "reel",
+      mediaType: "video",
+      videoUrl: "idb-video:video-1",
+    };
+    let next = withExistingPost(state, projectA.id, reel);
+    const copied = copyPostToProjectState(next, "reel-a", projectB.id, ALL_OPTIONS);
+    if ("error" in copied) throw new Error("beklenmeyen hata");
+    next = copied.state;
+    // Kaynak projeden silme (setExistingPosts eşdeğeri).
+    const afterDelete = syncActiveProject({
+      ...next,
+      projects: (next.projects ?? []).map((project) =>
+        project.id === projectA.id ? { ...project, existingPosts: [] } : project,
+      ),
+      ...(next.activeProjectId === projectA.id ? { existingPosts: [] } : {}),
+    });
+    const target = projectFor(afterDelete, projectB.id);
+    expect(target.existingPosts).toHaveLength(1);
+    // Hedefin kalıcı video referansı bozulmaz; IndexedDB Blob'ı hâlâ aynı ref'ten yüklenebilir.
+    expect(target.existingPosts[0].videoUrl).toBe("idb-video:video-1");
+    expect(target.existingPosts[0].mediaType).toBe("video");
+  });
+
   it("seçenekler kapalıyken caption/tür aktarılmaz", () => {
     const { state, projectA, projectB } = crossBrandState();
     const next = withExistingPost(

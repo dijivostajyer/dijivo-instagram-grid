@@ -5,6 +5,10 @@ export const SHARE_SNAPSHOT_VERSION = 1;
 export const MAX_SHARE_CELLS = 60;
 export const MAX_SHARE_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_SHARE_TOTAL_BYTES = 20 * 1024 * 1024;
+/** Phase 2 (§5/§9): reel video boyut sınırı (dosya başına). */
+export const MAX_SHARE_VIDEO_BYTES = 100 * 1024 * 1024;
+/** Phase 2 (§5/§9): paylaşım başına toplam video sınırı. */
+export const MAX_SHARE_TOTAL_VIDEO_BYTES = 200 * 1024 * 1024;
 
 export interface ShareBrand {
   name: string;
@@ -27,6 +31,14 @@ export interface ShareGridCell {
   column: number;
   pinned: boolean;
   postType?: PostType;
+  /** Gönderi açıklaması (Phase 2, §3); eski paylaşımlarda yok olabilir. */
+  caption?: string;
+  /** Medya türü (Phase 2, §4); tanımsız = görsel gönderi. */
+  mediaType?: "image" | "video";
+  /** Reel videosu için paylaşılabilir URL (data URL veya storage referansı). */
+  videoUrl?: string;
+  /** Reel kapak görseli URL'si (grid'de video yerine gösterilir). */
+  coverImageUrl?: string;
 }
 
 export interface ShareSnapshotInput {
@@ -65,6 +77,26 @@ export function isShareableImageUrl(value: string): boolean {
   }
 }
 
+/**
+ * Yalnızca taşınabilir reel video URL'leri kabul edilir
+ * (Phase 2, §4/§9): data URL (mp4/webm), private share-media
+ * storage referansı (`storage:media/…`) veya doğrudan http(s)
+ * akışı. blob:/idb:/idb-video: referansları reddedilir.
+ */
+export function isShareableVideoUrl(value: string): boolean {
+  if (value.startsWith("blob:") || value.startsWith("idb:") || value.startsWith("idb-video:")) return false;
+  if (/^storage:media\/[0-9a-f-]+\/[a-z0-9-]+\.(?:mp4|webm)$/i.test(value)) return true;
+  if (/^data:video\/(?:mp4|webm);base64,[a-z0-9+/=]+$/i.test(value)) {
+    return true;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 function isShareBrand(value: unknown): value is ShareBrand {
   return (
     isRecord(value) &&
@@ -91,8 +123,12 @@ function isShareGridCell(value: unknown): value is ShareGridCell {
     typeof value.position === "number" &&
     typeof value.row === "number" &&
     typeof value.column === "number" &&
-    typeof value.pinned === "boolean"
-    && (value.postType === undefined || value.postType === "post" || value.postType === "reel" || value.postType === "carousel")
+    typeof value.pinned === "boolean" &&
+    (value.postType === undefined || value.postType === "post" || value.postType === "reel" || value.postType === "carousel") &&
+    isOptionalString(value.caption) &&
+    (value.mediaType === undefined || value.mediaType === "image" || value.mediaType === "video") &&
+    (value.videoUrl === undefined || (typeof value.videoUrl === "string" && isShareableVideoUrl(value.videoUrl))) &&
+    (value.coverImageUrl === undefined || (typeof value.coverImageUrl === "string" && isShareableImageUrl(value.coverImageUrl)))
   );
 }
 
@@ -180,6 +216,10 @@ export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnaps
       column: cell.column,
       pinned: cell.pinned,
       postType: cell.post.postType ?? "post",
+      caption: cell.post.caption,
+      mediaType: cell.post.mediaType,
+      videoUrl: cell.post.videoUrl,
+      coverImageUrl: cell.post.coverImageUrl,
     })),
   };
 }

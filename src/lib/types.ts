@@ -68,6 +68,15 @@ export interface Post {
   postType?: PostType;
   /** Gönderi açıklaması (caption); hashtag/mention içerebilir. */
   caption?: string;
+  /**
+   * Medya türü; reel'ler için video desteği (Phase 2, §4).
+   * Eski kayıtlar ve görsel gönderiler için tanımsız = image.
+   */
+  mediaType?: "image" | "video";
+  /** Reel videosu URL'si (mediaType: "video" ise). */
+  videoUrl?: string;
+  /** Reel kapak görseli URL'si (video yerine grid'de gösterilir). */
+  coverImageUrl?: string;
 }
 
 /** Instagram'da halihazırda yayında olan gönderi */
