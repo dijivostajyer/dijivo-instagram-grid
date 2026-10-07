@@ -33,6 +33,10 @@ sonucu verir) ve şunları içerir:
 
 - `dijivo_touch_calendar_row()` / `dijivo_touch_updated_at()` trigger
   fonksiyonları — `updated_at` + `remind_at` bakımı,
+- `dispatch_due_reminders(integer)` **RPC fonksiyonu** — arka plan işçisinin
+  vadesi gelmiş hatırlatmaları tek idempotent çağrıda teslimata çeviren
+  kaynağı (ham SQL PostgREST'e gönderilmez; `POST
+  /rest/v1/rpc/dispatch_due_reminders` çağrılır),
 - `calendar_items_remind_due_idx` — arka plan işçisinin kritik indeksi,
 - RLS **açık**, policy **tanımsız** → yalnızca `service_role` erişir.
 
@@ -50,6 +54,12 @@ select indexname from pg_indexes
 where schemaname = 'public' and tablename = 'calendar_items'
 order by indexname;
 -- calendar_items_remind_due_idx görünmeli
+
+select p.proname, pg_get_function_identity_arguments(p.oid) as args
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.proname = 'dispatch_due_reminders';
+-- dispatch_due_reminders(integer) görünmeli (RPC varlığı)
 ```
 
 Uygulama tarafında doğrulama:
@@ -69,13 +79,36 @@ curl -s http://localhost:3000/api/calendar/config
 Tarayıcıdaki 15 saniyelik polling yalnızca **sekme açıkken** çalışır.
 Gerçek arka plan teslimatı Edge Function ile yapılır.
 
-### 2.1 Edge Function'ı deploy et
+### 2.1 Vault secret'ları (önce bunu çalıştır)
 
-```bash
-supabase functions deploy reminder-dispatch
+Cron → Edge Function çağrısında proje URL'si ve service-role anahtarı
+**düz metin olarak hiçbir SQL dosyasında bulunmaz**; Supabase Vault'ta
+saklanır (Supabase docs: *Scheduling Edge Functions*).
+SQL Editor'da **bir kez**:
+
+```sql
+select vault.create_secret('https://<project-ref>.supabase.co', 'dijivo_project_url');
+select vault.create_secret('<service_role_key>', 'dijivo_service_key');
 ```
 
-### 2.2 VAPID anahtarları
+- URL'nin sonunda eğik çizgi olmasın (0004 `rtrim` ile yine korur).
+- Bu secret'lar `202610020004` dosyasının **ön koşulu**dur; yoksa dosya
+  açık hata mesajıyla durar, kırık job kurmaz.
+- Secret değerleri repoya/commit'e **asla** girmez.
+
+### 2.2 Edge Function'ı deploy et
+
+```bash
+supabase functions deploy reminder-dispatch --no-verify-jwt
+```
+
+**`--no-verify-jwt` neden gerekli:** cron çağrısı platform JWT'si değil,
+`apikey` header'ı ile gelir (service-to-service modeli). Function,
+gelen `apikey`'i kendi `SUPABASE_SERVICE_ROLE_KEY` değeriyle eşleştirir;
+eşleşmezse **401** döner. verify_jwt açık deploy ederseniz cron her
+dakika 401 alır.
+
+### 2.3 VAPID anahtarları
 
 ```bash
 npx web-push generate-vapid-keys
@@ -96,8 +129,9 @@ Güvenlik kuralları:
 - istemci kodu yalnızca `NEXT_PUBLIC_VAPID_PUBLIC_KEY` görür
   (public anahtar gizli değildir; abonelik açmak için gerekir).
 
-### 2.3 Cron zamanlaması
+### 2.4 Cron zamanlaması
 
+Vault secret'ları (§2.1) ve Edge Function (§2.2) hazır olduktan sonra
 `supabase/migrations/202610020003_create_calendar_tables.sql`
 çalıştırıldıktan **sonra**, SQL Editor'da:
 
@@ -105,22 +139,34 @@ Güvenlik kuralları:
 supabase/migrations/202610020004_schedule_reminder_dispatch.sql
 ```
 
-Bu, `reminder-dispatch` işini `pg_cron` ile **her dakika** tetikler.
+Bu, `reminder-dispatch` işini `pg_cron` ile **her dakika** tetikler;
+çağrı `pg_net` + `net.http_post` ile yapılır, URL/key çalışma anında
+`vault.decrypted_secrets`'ten okunur. Dosya idempotenttir (eski job
+önce `unschedule` edilir).
 
-### 2.4 Elle doğrulama
+### 2.5 Elle doğrulama
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer <service_role_key>" \
+  -H "apikey: <service_role_key>" \
   -H "Content-Type: application/json" \
   https://<project-ref>.supabase.co/functions/v1/reminder-dispatch
 ```
 
 Beklenen: `{"ok":true,"created":0,...}`.
 Aynı komutu ikinci kez çalıştırdığınızda yine `created:0` olmalıdır —
-**idempotency kanıtı**.
+**idempotency kanıtı** (RPC `on conflict do nothing` + `unique
+(item_id, remind_at)`; yalnızca bu çağrıda YENİ satırlar döner).
 
-### 2.5 Uygulama tarafı
+Sorun giderme:
+
+| Belirti | Neden / Çözüm |
+| --- | --- |
+| `401 unauthorized` | Vault'taki key ≠ function'ın service-role key'i ya da verify_jwt ile deploy edildi → §2.2 |
+| `500 dispatch_rpc_failed` + `PGRST202` | `dispatch_due_reminders()` yok → 0003 migration'ını çalıştırın |
+| Job tetiklenmiyor | `select * from cron.job_run_details order by start_time desc limit 5;` |
+
+### 2.6 Uygulama tarafı
 
 `.env.local` içine:
 

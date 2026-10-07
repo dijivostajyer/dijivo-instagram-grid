@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import {
   REMINDER_CHANNELS,
-  dueReminderInsertSql,
+  dispatchDueRemindersRpc,
   isGonePushEndpoint,
   isReminderChannel,
   normalizePushSubscription,
@@ -12,6 +15,25 @@ import {
   toDeliveryView,
   type ReminderDeliveryRow,
 } from "./reminder-dispatch";
+
+/**
+ * Arka plan teslimatının SQL kaynağı migration dosyasıdır
+ * (`dispatch_due_reminders()`); bu testler o metni doğrudan okuyup
+ * idempotency sözleşmesini doğrular.
+ */
+const calendarMigrationSql = readFileSync(
+  path.resolve(
+    __dirname,
+    "../../supabase/migrations/202610020003_create_calendar_tables.sql",
+  ),
+  "utf8",
+);
+
+/** Migration içindeki dispatch_due_reminders() fonksiyon gövdesi. */
+const dispatchFnSql = calendarMigrationSql.slice(
+  calendarMigrationSql.indexOf("function public.dispatch_due_reminders"),
+  calendarMigrationSql.indexOf("revoke execute on function public.dispatch_due_reminders"),
+);
 
 function row(overrides: Partial<ReminderDeliveryRow> = {}): ReminderDeliveryRow {
   return {
@@ -47,43 +69,71 @@ describe("kanal mimarisi (in_app / browser_push / email)", () => {
   });
 });
 
-describe("vadesi gelmiş hatırlatma sorgusu (arka plan işçisi)", () => {
+describe("vadesi gelmiş hatırlatma RPC'si (arka plan işçisi)", () => {
+  it("PostgREST RPC sözleşmesi: rpc/dispatch_due_reminders + p_limit 200", () => {
+    expect(dispatchDueRemindersRpc.path).toBe("rpc/dispatch_due_reminders");
+    expect(JSON.parse(dispatchDueRemindersRpc.body)).toEqual({ p_limit: 200 });
+  });
+
+  it("SQL kaynağı migration'dadır: create or replace + returns setof", () => {
+    expect(calendarMigrationSql).toContain(
+      "create or replace function public.dispatch_due_reminders(",
+    );
+    expect(dispatchFnSql).toContain("returns setof public.reminder_deliveries");
+  });
+
   it("remind_at <= now() koşulunu içerir", () => {
-    expect(dueReminderInsertSql).toContain("i.remind_at <= now()");
+    expect(dispatchFnSql).toContain("i.remind_at <= now()");
   });
 
   it("hatırlatması olmayan kayıtları dışlar", () => {
-    expect(dueReminderInsertSql).toContain("i.remind_at is not null");
+    expect(dispatchFnSql).toContain("i.remind_at is not null");
   });
 
   it("iptal edilmiş kayıtları göndermez", () => {
-    expect(dueReminderInsertSql).toContain("i.status <> 'cancelled'");
+    expect(dispatchFnSql).toContain("i.status <> 'cancelled'");
   });
 
   it("on conflict do nothing ile idempotenttir (aynı hatırlatma iki kez gitmez)", () => {
-    expect(dueReminderInsertSql).toContain(
+    expect(dispatchFnSql).toContain(
       "on conflict (item_id, remind_at) do nothing",
     );
   });
 
   it("not exists alt sorgusu ile zaten teslim edilmişleri atlar", () => {
-    expect(dueReminderInsertSql).toContain("not exists");
-    expect(dueReminderInsertSql).toContain("d.item_id = i.id");
-    expect(dueReminderInsertSql).toContain("d.remind_at = i.remind_at");
+    expect(dispatchFnSql).toContain("not exists");
+    expect(dispatchFnSql).toContain("d.item_id = i.id");
+    expect(dispatchFnSql).toContain("d.remind_at = i.remind_at");
   });
 
-  it("in_app ve browser_push kanallarını üretir", () => {
-    expect(dueReminderInsertSql).toContain("('in_app'), ('browser_push')");
+  it("YALNIZCA bu çağrıda yeni oluşturulan satırları RETURN QUERY ile döndürür", () => {
+    // Kanal cross join'i YOK: unique (item_id, remind_at) kanal içermiyor,
+    // ikinci satır her zaman çakışırdı → worker yalnızca browser_push
+    // satırı üretir, dönen satırlar = gerçekten yeni claim edilenler.
+    expect(dispatchFnSql).toContain("return query");
+    expect(dispatchFnSql).toContain("returning *");
+    expect(dispatchFnSql).toContain("'browser_push'");
+    expect(dispatchFnSql).not.toContain("values ('in_app'), ('browser_push')");
   });
 
-  it("işçi tek seferde sınırlı sayıda kayıt işler", () => {
-    expect(dueReminderInsertSql).toContain("limit 200");
+  it("işçi tek seferde sınırlı sayıda kayıt işler (p_limit, varsayılan 200)", () => {
+    expect(dispatchFnSql).toContain("p_limit integer default 200");
+    expect(dispatchFnSql).toContain("limit p_limit");
   });
 
-  it("teslimat kaydı için brand, başlık ve gövde yazar", () => {
-    expect(dueReminderInsertSql).toContain("i.brand_id");
-    expect(dueReminderInsertSql).toContain("i.title");
-    expect(dueReminderInsertSql).toContain("Görev hatırlatması");
+  it("teslimat kaydı için marka, başlık ve gövde yazar", () => {
+    expect(dispatchFnSql).toContain("i.brand_id");
+    expect(dispatchFnSql).toContain("i.title");
+    expect(dispatchFnSql).toContain("Görev hatırlatması");
+  });
+
+  it("yalnızca service_role çağırabilir (anon/authenticated kapalı)", () => {
+    expect(calendarMigrationSql).toContain(
+      "revoke execute on function public.dispatch_due_reminders(integer)",
+    );
+    expect(calendarMigrationSql).toContain(
+      "grant execute on function public.dispatch_due_reminders(integer)",
+    );
   });
 });
 

@@ -3,17 +3,34 @@
  *
  * Tarayıcı açıkken 15 saniyelik polling yalnızca "kullanıcı zaten ekrana
  * bakıyorken" çalışır. Gerçek arka plan teslimatı backend'de yapılır:
- * Supabase Edge Function (`supabase/functions/reminder-dispatch`) bu
- * modülün SQL'ini ve şemasını kullanır.
+ * Supabase Edge Function (`supabase/functions/reminder-dispatch`) bir
+ * PostgreSQL RPC'sini çağırır.
  *
  * Idempotency sözleşmesi:
  *
  *   remind_at <= now()  AND  henüz teslim kaydı yok
  *
- * denklemine karşılık gelen tek SQL ifadesi `dueReminderInsertSql`
- * (`on conflict do nothing` ile). `reminder_deliveries` üzerindeki
+ * denklemine karşılık gelen tek kaynağın `dispatch_due_reminders()`
+ * fonksiyonudur (`supabase/migrations/202610020003_create_calendar_tables.sql`)
+ * — fonksiyon `on conflict do nothing` kullanır ve yalnızca YENİ oluşturulan
+ * satırları RETURN QUERY ile döndürür. `reminder_deliveries` üzerindeki
  * `unique (item_id, remind_at)` kısıtı yarışta ikinci işçiyi de durdurur.
+ *
+ * Edge Function ham SQL'i PostgREST body olarak GÖNDERMEZ (PostgREST ham
+ * SQL çalıştırmaz); `POST /rest/v1/rpc/dispatch_due_reminders` çağrısı yapar.
+ * Aşağıdaki `dispatchDueRemindersRpc` bu sözleşmenin istemci tarafındaki
+ * tanımıdır; SQL'in tek doğruluk kaynağı migration dosyasındadır ve
+ * `reminder-scheduler.test.ts` oradaki metni doğrular.
  */
+
+/**
+ * `dispatch_due_reminders()` RPC çağrısı (Edge Function tarafından kullanılır).
+ * `p_limit`, tek çağrıda işlenecek azami hatırlatma sayısıdır (varsayılan 200).
+ */
+export const dispatchDueRemindersRpc = {
+  path: "rpc/dispatch_due_reminders",
+  body: JSON.stringify({ p_limit: 200 }),
+} as const;
 
 /** Teslimat kanalları (§ mimari: in_app / browser_push / email). */
 export const REMINDER_CHANNELS = ["in_app", "browser_push", "email"] as const;
@@ -41,49 +58,6 @@ export function shouldAttemptChannel(
   if (channel === "browser_push") return hasPushSubscription;
   return emailTransportReady;
 }
-
-/**
- * Vadesi gelmiş hatırlatmaları tek ve idempotent bir ifadeyle alır.
- *
- * - `due_at = scheduled_at - reminder_offset_minutes`
- * - Teslim kaydı `on conflict do nothing` ile yazılır; çakışan satır
- *   döndürülmez → "zaten gönderilmiş" demektir.
- * - `for update skip locked` eşzamanlı işçi çağrılarını birbirinden
- *   ayırır (cron + elle tetikleme birlikte çalışabilir).
- */
-export const dueReminderInsertSql = `
-insert into public.reminder_deliveries
-  (item_id, brand_id, channel, remind_at, scheduled_at, title, body)
-select
-  i.id,
-  i.brand_id,
-  v.channel::text,
-  i.remind_at,
-  i.scheduled_at,
-  i.title,
-  case i.item_type
-    when 'task' then 'Görev hatırlatması'
-    when 'note' then 'Not hatırlatması'
-    when 'story' then 'Story hatırlatması'
-    when 'reel' then 'Reel hatırlatması'
-    else 'Post hatırlatması'
-  end
-from public.calendar_items i
-cross join (values ('in_app'), ('browser_push')) as v(channel)
-where i.remind_at is not null
-  and i.remind_at <= now()
-  and i.status <> 'cancelled'
-  and not exists (
-    select 1
-    from public.reminder_deliveries d
-    where d.item_id = i.id
-      and d.remind_at = i.remind_at
-  )
-order by i.remind_at
-limit 200
-on conflict (item_id, remind_at) do nothing
-returning id, item_id, brand_id, channel, remind_at, scheduled_at, title, body;
-`;
 
 /** Bildirim merkezinde gösterilecek teslimatın istemci görünümü. */
 export interface ReminderDeliveryRow {

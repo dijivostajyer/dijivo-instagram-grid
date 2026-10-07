@@ -171,10 +171,95 @@ create trigger push_subscriptions_touch_row
 alter table public.push_subscriptions enable row level security;
 
 -- ---------------------------------------------------------------------------
--- 4. Doğrulama (isteğe bağlı, SQL Editor'da çalıştırılabilir)
+-- 4. dispatch_due_reminders() — arka plan hatırlatma işçisi RPC'si
+-- ---------------------------------------------------------------------------
+--
+-- Edge Function (`supabase/functions/reminder-dispatch`) ham SQL göndermez;
+-- PostgREST ham SQL çalıştırmaz (yalnızca JSON bekler). Bunun yerine bu
+-- fonksiyon `/rest/v1/rpc/dispatch_due_reminders` üzerinden çağırılır.
+--
+-- Sözleşme:
+--   - Vadesi gelmiş kayıtları (`remind_at <= now()`, `remind_at is not null`,
+--     `status <> 'cancelled'`) tek bir `browser_push` teslimat satırına
+--     çevirir.
+--   - `unique (item_id, remind_at)` + `on conflict do nothing` sayesinde aynı
+--     hatırlatma ASLA ikinci kez satır üretmez (at-most-once). İstemcinin
+--     açıkken yazdığı `in_app` satırıyla yarış da bu kısıt tarafından
+--     çözülür: ilk kazanan teslimatı sahiplenir, kaybeden çakışır ve sessizce
+--     atlar — çift bildirim imkânsızdır.
+--   - Yalnızca bu çağrıda YENİ oluşturulan satırları döndürür
+--     (`return query insert ... returning *`) → işçi dönen satırlara push
+--     gönderir; çakışan (zaten teslim edilmiş) satır dönmez, gereksiz push
+--     atılmaz.
+--   - `limit p_limit` (varsayılan 200) tek çağrıda işlenecek azami hatırlatma
+--     sayısıdır; kalanlar bir sonraki cron çağrısında işlenir.
+--
+-- Yeniden çalıştırmak güvenlidir (`create or replace function`, mevcut
+-- tablolara dokunmaz).
+
+create or replace function public.dispatch_due_reminders(
+  p_limit integer default 200
+)
+returns setof public.reminder_deliveries
+language plpgsql
+as $$
+begin
+  return query
+  insert into public.reminder_deliveries
+    (item_id, brand_id, channel, remind_at, scheduled_at, title, body)
+  select
+    i.id,
+    i.brand_id,
+    'browser_push',
+    i.remind_at,
+    i.scheduled_at,
+    i.title,
+    case i.item_type
+      when 'task' then 'Görev hatırlatması'
+      when 'note' then 'Not hatırlatması'
+      when 'story' then 'Story hatırlatması'
+      when 'reel' then 'Reel hatırlatması'
+      else 'Post hatırlatması'
+    end
+  from public.calendar_items i
+  where i.remind_at is not null
+    and i.remind_at <= now()
+    and i.status <> 'cancelled'
+    and not exists (
+      select 1
+      from public.reminder_deliveries d
+      where d.item_id = i.id
+        and d.remind_at = i.remind_at
+    )
+  order by i.remind_at
+  limit p_limit
+  on conflict (item_id, remind_at) do nothing
+  returning *;
+end;
+$$;
+
+-- Yalnızca service-role çağırabilir (Edge Function ve Next.js API katmanı).
+-- anon/authenticated/public bu işlevi çalıştıramaz.
+revoke execute on function public.dispatch_due_reminders(integer)
+  from public, anon, authenticated;
+grant execute on function public.dispatch_due_reminders(integer)
+  to service_role, postgres;
+
+-- ---------------------------------------------------------------------------
+-- 5. Doğrulama (isteğe bağlı, SQL Editor'da çalıştırılabilir)
 -- ---------------------------------------------------------------------------
 --
 -- select table_name, indexname from pg_indexes
 --  where schemaname = 'public'
 --    and tablename in ('calendar_items','reminder_deliveries','push_subscriptions')
 --  order by table_name, indexname;
+--
+-- select p.proname, pg_get_function_identity_arguments(p.oid) as args
+--  from pg_proc p
+--  join pg_namespace n on n.oid = p.pronamespace
+--  where n.nspname = 'public' and p.proname = 'dispatch_due_reminders';
+-- -- dispatch_due_reminders(integer) görünmeli (RPC'nin varlığı)
+--
+-- DİKKAT: `select * from public.dispatch_due_reminders(0);` doğrulama amaçlı
+-- DEĞİLDİR — 0 limiti güvenlidir (satır üretmez), ancak limitsiz çağrısı
+-- vadesi gelen TÜM hatırlatmaları hemen teslim eder.

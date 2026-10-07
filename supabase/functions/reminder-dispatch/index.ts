@@ -2,26 +2,38 @@
  * reminder-dispatch — arka plan hatırlatma işçisi.
  *
  * Tarayıcı/sekme kapalıyken çalışır. `supabase/functions/reminder-dispatch`
- * olarak deploy edilir ve
- * `supabase/migrations/202610020004_schedule_reminder_dispatch.sql` ile
- * pg_cron üzerinden her dakika tetiklenir.
+ * olarak deploy edilir ve `202610020004_schedule_reminder_dispatch.sql`
+ * ile pg_cron + pg_net üzerinden her dakika tetiklenir.
  *
  * Akış:
- *   1. Vadesi gelmiş hatırlatmaları TEK idempotent ifadeyle teslimat
- *      kaydına çevirir (`on conflict do nothing`).
- *   2. `browser_push` teslimatlarını ilgili markanın aboneliklerine
- *      gönderir (VAPID, `npm:web-push`).
- *   3. 404/410 dönen abonelikleri siler (ölü abonelik temizliği).
+ *   1. Vadesi gelmiş hatırlatmaları **PostgREST RPC** üzerinden TEK
+ *      idempotent çağrıda teslimat kaydına çevirir:
+ *        POST /rest/v1/rpc/dispatch_due_reminders  { "p_limit": 200 }
+ *      RPC (dispatch_due_reminders), `202610020003_create_calendar_tables.sql`
+ *      içinde tanımlıdır: `remind_at <= now() AND not yet delivered`
+ *      sorgusunu çalıştırır, `unique (item_id, remind_at)` korumasıyla
+ *      `on conflict do nothing` yapar ve YALNIZCA bu çağrıda yeni
+ *      oluşturulan satırları RETURN QUERY ile döndürür.
  *
- * Aynı SQL `src/lib/reminder-dispatch.ts` içinde `dueReminderInsertSql`
- * olarak tanımlıdır ve birim testleriyle doğrulanır; buradaki sürüm
- * Edge Function ortamı (`src/` içe aktarılamaz) için kopyalanmıştır.
- * İkisi birlikte değiştirilmelidir.
+ *      Neden RPC? PostgREST ham SQL çalıştırmaz — `/rest/v1/<tabloya>`
+ *      ham SQL body olarak göndermek production'da 400 döner ve teslimat
+ *      hiç üretilmez. Ham SQL'in doğru yeri veritabanı fonksiyonudur.
+ *
+ *   2. Dönen (`browser_push` kanallı) satırları ilgili markanın
+ *      aboneliklerine gönderir (VAPID, `npm:web-push`).
+ *   3. 404/410 dönen abonelikleri siler (ölü abonelik temizliği).
  *
  * GEREKLİ SECRET'LAR (Edge Function secrets — asla commit edilmez):
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (otomatik gelir),
  *   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
  * `VAPID_PRIVATE_KEY` istemciye ASLA aktarılmaz.
+ *
+ * AUTH: function `--no-verify-jwt` ile deploy edilir; cron çağrısı
+ * `apikey` header'ıyla gelir (Supabase docs: Securing Edge Functions —
+ * service-to-service çağrılar JWT değil apikey taşır). Bu function
+ * gelen apikey'i kendi service-role anahtarıyla eşleştirir; eşleşmezse
+ * 401 döner. pg_net çağrısındaki header seti
+ * `202610020004_schedule_reminder_dispatch.sql` içinde tanımlıdır.
  */
 
 import webpush from "npm:web-push@3.6.7";
@@ -31,40 +43,9 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY");
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY");
 
-/** `src/lib/reminder-dispatch.ts` ile birebir aynı olmalıdır. */
-const DUE_REMINDER_INSERT_SQL = `
-insert into public.reminder_deliveries
-  (item_id, brand_id, channel, remind_at, scheduled_at, title, body)
-select
-  i.id,
-  i.brand_id,
-  v.channel::text,
-  i.remind_at,
-  i.scheduled_at,
-  i.title,
-  case i.item_type
-    when 'task' then 'Görev hatırlatması'
-    when 'note' then 'Not hatırlatması'
-    when 'story' then 'Story hatırlatması'
-    when 'reel' then 'Reel hatırlatması'
-    else 'Post hatırlatması'
-  end
-from public.calendar_items i
-cross join (values ('in_app'), ('browser_push')) as v(channel)
-where i.remind_at is not null
-  and i.remind_at <= now()
-  and i.status <> 'cancelled'
-  and not exists (
-    select 1
-    from public.reminder_deliveries d
-    where d.item_id = i.id
-      and d.remind_at = i.remind_at
-  )
-order by i.remind_at
-limit 200
-on conflict (item_id, remind_at) do nothing
-returning id, item_id, brand_id, channel, remind_at, scheduled_at, title, body;
-`;
+/** RPC adı — 0003 migration'ındaki `dispatch_due_reminders()` ile birebir aynı olmalıdır. */
+const DISPATCH_RPC = "rpc/dispatch_due_reminders";
+const DISPATCH_RPC_BODY = JSON.stringify({ p_limit: 200 });
 
 interface DeliveryRow {
   id: string;
@@ -101,24 +82,47 @@ function pushConfigured(): boolean {
   return Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 }
 
-Deno.serve(async () => {
+/**
+ * Handler-side auth (`--no-verify-jwt` deploy edildiği için platform
+ * kontrolü kapalıdır). Cron çağrısı `apikey` header'ıyla service-role
+ * anahtarını taşır; `Authorization: Bearer` da desteklenir.
+ */
+function isAuthorized(request: Request): boolean {
+  const presented =
+    request.headers.get("apikey") ??
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+    "";
+  return presented.length > 0 && presented === SERVICE_ROLE_KEY;
+}
+
+function jsonError(status: number, error: string, detail?: string): Response {
+  return new Response(
+    JSON.stringify(detail === undefined ? { error } : { error, detail }),
+    { status, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+Deno.serve(async (request) => {
+  if (!isAuthorized(request)) {
+    return jsonError(401, "unauthorized");
+  }
+
   const started = Date.now();
 
-  // 1) Idempotent teslimat kaydı üretimi.
-  const insertResponse = await postgrest("reminder_deliveries", {
+  // 1) Idempotent teslimat kaydı — PostgREST RPC (ham SQL DEĞİL).
+  const dispatchResponse = await postgrest(DISPATCH_RPC, {
     method: "POST",
-    body: DUE_REMINDER_INSERT_SQL,
+    body: DISPATCH_RPC_BODY,
   });
-  if (!insertResponse.ok) {
-    const detail = await insertResponse.text();
-    return new Response(
-      JSON.stringify({ error: "delivery_insert_failed", detail }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
+  if (!dispatchResponse.ok) {
+    const detail = await dispatchResponse.text();
+    return jsonError(500, "dispatch_rpc_failed", detail);
   }
-  const deliveries = (await insertResponse.json()) as DeliveryRow[];
+  // RPC SETOF döndürür → doğrudan satır dizisi gelir; yalnızca bu çağrıda
+  // yeni eklenen (çakışmayan) satırlar buradadır.
+  const deliveries = (await dispatchResponse.json()) as DeliveryRow[];
 
-  // 2) Push gönderimi.
+  // 2) Push gönderimi (dönen satırlar zaten browser_push kanalındadır).
   const pushDeliveries = deliveries.filter((row) => row.channel === "browser_push");
   let pushed = 0;
   let removedSubscriptions = 0;
@@ -159,29 +163,29 @@ Deno.serve(async () => {
               deliveryId: row.id,
             },
           });
-        for (const subscription of subscriptions) {
-          try {
-            await webpush.sendNotification(
-              {
-                endpoint: subscription.endpoint,
-                keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-              },
-              payload,
-            );
-            pushed += 1;
-          } catch (error) {
-            const status = (error as { statusCode?: number }).statusCode;
-            // 404/410: abonelik artık geçerli değil → temizle.
-            if (status === 404 || status === 410) {
-              await postgrest(`push_subscriptions?id=eq.${subscription.id}`, {
-                method: "DELETE",
-              });
-              removedSubscriptions += 1;
-            } else {
-              skipped += 1;
+          for (const subscription of subscriptions) {
+            try {
+              await webpush.sendNotification(
+                {
+                  endpoint: subscription.endpoint,
+                  keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+                },
+                payload,
+              );
+              pushed += 1;
+            } catch (error) {
+              const status = (error as { statusCode?: number }).statusCode;
+              // 404/410: abonelik artık geçerli değil → temizle.
+              if (status === 404 || status === 410) {
+                await postgrest(`push_subscriptions?id=eq.${subscription.id}`, {
+                  method: "DELETE",
+                });
+                removedSubscriptions += 1;
+              } else {
+                skipped += 1;
+              }
             }
           }
-        }
         }
       }
     }
