@@ -39,7 +39,10 @@ import {
   notificationPermission,
   requestNotificationPermission,
   showBrowserNotification,
-} from "@/lib/browser-push";/**
+  subscribePush,
+} from "@/lib/browser-push";
+
+/**
  * İstemci yedeği poll aralığı (§27). **Bu birincil teslimat yolu
  * değildir** — arka plan teslimatı backend işçisindedir
  * (`supabase/functions/reminder-dispatch`, pg_cron ile her dakika).
@@ -271,6 +274,15 @@ export function useCalendarStore(
     const permission = await requestNotificationPermission(brandId);
     setBrowserPermission(permission);
   }, [brandId]);
+
+  // İzin, uygulama dışındayken (ör. tarayıcı site ayarlarından) verilmiş
+  // olabilir. Eski akış bu durumda UI'ı "etkin" gösterip subscribe çağrısını
+  // hiç yapmıyordu; sonuç olarak push_subscriptions boş kalıyordu. Aktif
+  // marka hazır olduğunda aboneliği idempotent biçimde backend'e eşitleriz.
+  useEffect(() => {
+    if (browserPermission !== "granted" || brandId.length === 0) return;
+    void subscribePush(brandId);
+  }, [brandId, browserPermission]);
 
   /** §36: optimistic create — hata durumunda rollback. */
   const createItem = useCallback(

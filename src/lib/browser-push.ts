@@ -43,9 +43,14 @@ export async function requestNotificationPermission(
   brandId?: string,
 ): Promise<NotificationPermission | "unsupported"> {
   if (!isNotificationSupported()) return "unsupported";
-  const permission = await window.Notification.requestPermission();
+  // İzin daha önce tarayıcı ayarlarından verilmiş olabilir. Bu durumda
+  // `requestPermission()` tekrar bir pencere açmaz, ama gereksiz bir çağrı
+  // yerine doğrudan abonelik senkronizasyonuna geçiyoruz.
+  const permission =
+    window.Notification.permission === "granted"
+      ? "granted"
+      : await window.Notification.requestPermission();
   if (permission === "granted") {
-    await registerPushServiceWorker();
     if (brandId) await subscribePush(brandId);
   }
   return permission;
@@ -85,6 +90,13 @@ export async function subscribePush(brandId: string): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ brandId, subscription: subscription.toJSON() }),
     });
+    if (!response.ok) {
+      const responseBody = await response.text();
+      console.warn("[calendar] Push aboneliği kaydedilemedi:", {
+        status: response.status,
+        body: responseBody,
+      });
+    }
     return response.ok;
   } catch (error) {
     console.warn("[calendar] Push aboneliği kurulamadı:", error);
@@ -111,9 +123,10 @@ export function urlBase64ToUint8Array(base64: string): Uint8Array {
 export async function registerPushServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!("serviceWorker" in navigator)) return null;
   try {
-    const registration = await navigator.serviceWorker.register("/sw.js");
-    await navigator.serviceWorker.ready;
-    return registration;
+    await navigator.serviceWorker.register("/sw.js");
+    // `register()` dönen kaydın worker'ı henüz active olmayabilir. PushManager
+    // işlemlerini, aktif worker garanti eden `ready` kaydı üzerinden yaparız.
+    return await navigator.serviceWorker.ready;
   } catch (error) {
     // localhost/HTTPS dışı ortamlarda kayıt reddedilebilir;
     // in-app hatırlatmalar buna bağlı değildir.
