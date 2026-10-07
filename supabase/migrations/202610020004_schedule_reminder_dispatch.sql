@@ -32,6 +32,11 @@
 -- 1. Uzantılar (idempotent)
 -- ---------------------------------------------------------------------------
 -- pg_cron ve pg_net çoğu Supabase projesinde hazırdır; yoksa açılır.
+-- Vault **uzantısı olarak açılmaz**: hosted Supabase ortamında
+-- `create extension vault`창한 .control dosyası yok ve
+-- `ERROR: extension "vault" is not available` verir. Vault bu ortamda
+-- hizmet olarak gelir; erişim `vault.decrypted_secrets` üzerinden
+-- sağlanır (extension kontrolü BỎlmeli).
 do $$
 begin
   if not exists (select 1 from pg_extension where extname = 'pg_cron') then
@@ -40,23 +45,31 @@ begin
   if not exists (select 1 from pg_extension where extname = 'pg_net') then
     create extension if not exists pg_net;
   end if;
-  if not exists (select 1 from pg_extension where extname = 'vault') then
-    create extension if not exists vault;
-  end if;
 end
 $$;
 
 -- ---------------------------------------------------------------------------
--- 2. Ön koşul denetimi — Vault secret'ları yoksa açık hata ver
+-- 2. Ön koşul denetimi — Vault erişimi yoksa açık hata ver
 -- ---------------------------------------------------------------------------
--- Sessizce eksik secret'lı (header'ları NULL → her dakika 401) bir job
--- kurmak yerine, neyin eksik olduğunu ve ne çalıştırılacağını söyleyerek
--- durur.
+-- `create extension vault`ÇALISIYRAMIYOR; Vault hizmet olarak gelir.
+-- Bu migration gövdesine bakmadan önce Vault'ın erişilebilir olduğundan
+-- emin olun (secret'lar daha önce oluşturulmuş olmalı).
+--
+-- Precondition: `vault.decrypted_secrets` sınıfı gerçekten var mı?
+--   - `to_regclass('vault.decrypted_secrets')` null değilse schema/object
+--     erişimli demektir.
+--   - Ek güvenlik için `to_regprocedure('vault.create_secret(text,text,text)')`
+--     (veya projenizdeki gerçek imza) varlığını da kontrol edebilirsiniz;
+--     ancak 0004'in kendi görevi secret OLUŞTURMAK değil, var olan secret'ları
+--     okumaktır, bu yüzden asıl kritik kontrol decrypted_secrets erişimidir.
 do $$
 begin
+  if to_regclass('vault.decrypted_secrets') is null then
+    raise exception E'Vault erişimi bulunamadı. Önce SQL Editor''da:\n  select vault.create_secret(''https://<project-ref>.supabase.co'', ''dijivo_project_url'');\n  select vault.create_secret(''<service-role key>'', ''dijivo_service_key'');\nkayıtlarını sorgulayın ve secret''ların gerçekten oluşturulduğundan emin olun.\n(Yeni oluşturulan secret''lar kayıtlar görünür; bu dosyanın job''u sadece oradan okur.) (Ayrıntı: SUPABASE-KURULUM.md §2.1)';
+  end if;
   if not exists (select 1 from vault.decrypted_secrets where name = 'dijivo_project_url')
      or not exists (select 1 from vault.decrypted_secrets where name = 'dijivo_service_key') then
-    raise exception E'Eksik Vault secret''ı. Önce SQL Editor''da çalıştırın:\n  select vault.create_secret(''https://<project-ref>.supabase.co'', ''dijivo_project_url'');\n  select vault.create_secret(''<service-role key>'', ''dijivo_service_key'');\nSonra bu dosyayı yeniden çalıştırın. (Ayrıntı: SUPABASE-KURULUM.md §2.2)';
+    raise exception E'Eksik Vault secret''ı. Önce SQL Editor''da:\n  select vault.create_secret(''https://<project-ref>.supabase.co'', ''dijivo_project_url'');\n  select vault.create_secret(''<service-role key>'', ''dijivo_service_key'');\nsecret''ları oluşturup bu dosyayı yeniden çalıştırın. (Ayrıntı: SUPABASE-KURULUM.md §2.1)';
   end if;
 end
 $$;

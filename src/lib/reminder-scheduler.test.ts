@@ -109,11 +109,19 @@ describe("pg_cron zamanlaması (202610020004)", () => {
     expect(cronMigrationSql).toContain("rtrim(");
   });
 
-  it("uzantılar idempotent açılır ve eksik Vault secret'ında açık hata verir", () => {
+  it("uzantılar idempotent açılır (pg_cron, pg_net) ve Vault extension ATMAZ", () => {
     expect(cronMigrationSql).toContain("create extension if not exists pg_cron");
     expect(cronMigrationSql).toContain("create extension if not exists pg_net");
-    expect(cronMigrationSql).toContain("create extension if not exists vault");
-    // Sessizce kırık job yerine precondition:
+    // Hosted Supabase'de `create extension vault` .control dosyası yoktur
+    // ve `ERROR: extension "vault" is not available` verir. Vault hizmet
+    // olarak gelir; migration içinden extension açmaya KALDIRILMIŞ olmalı.
+    // Yorumlarda geçen açıklama metni ("create extension vault") testi
+    // tetiklemesin diye yalnızca kod kısmı (yorumlar atlanmış) taranır.
+    expect(cronMigrationCode).not.toMatch(/create extension\b[^;]*vault/i);
+    // Bunun yerine Vault erişimi precondition'i ile korunur:
+    expect(cronMigrationSql).toContain("to_regclass('vault.decrypted_secrets')");
+    expect(cronMigrationSql).toContain("vault.decrypted_secrets");
+    // Eksik secret hala açık hatayla durdurur:
     expect(cronMigrationSql).toContain("raise exception");
     expect(cronMigrationSql).toContain("vault.create_secret");
   });

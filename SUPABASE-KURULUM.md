@@ -141,8 +141,20 @@ supabase/migrations/202610020004_schedule_reminder_dispatch.sql
 
 Bu, `reminder-dispatch` işini `pg_cron` ile **her dakika** tetikler;
 çağrı `pg_net` + `net.http_post` ile yapılır, URL/key çalışma anında
-`vault.decrypted_secrets`'ten okunur. Dosya idempotenttir (eski job
-önce `unschedule` edilir).
+`vault.decrypted_secrets`'ten okunur.
+
+İzgin bir ayrıntı: `202610020004` dosyası **Vault özelliğini bir uzantı
+olarak açmaya çalışmaz** (`create extension vault` içermez). Supabase'nın
+hosted ortamında `vault` bir `CREATE EXTENSION` uzantısı olarak sunulmadığı
+ve `vault.control` dosyasının bulunmadığı için buna çalışmak
+`ERROR: extension "vault" is not available`
+(Could not open vault.control) verir. Gerçek projede `select
+vault.create_secret(...)` zaten çalışıyorsa, Vault yalnızca `vault`
+scheması ve `vault.decrypted_secrets` gibi servis nesneleri üzerinden
+erişilir; migration'in görevi ön koşulda bu erişimi `to_regclass`
+ile doğrulayıp yoksa açık hatayla durmaktır.
+
+Dosya idempotenttir (eski job önce `unschedule` edilir).
 
 ### 2.5 Elle doğrulama
 
