@@ -81,14 +81,14 @@ Gerçek arka plan teslimatı Edge Function ile yapılır.
 
 ### 2.1 Vault secret'ları (önce bunu çalıştır)
 
-Cron → Edge Function çağrısında proje URL'si ve service-role anahtarı
+Cron → Edge Function çağrısında proje URL'si ve özel cron anahtarı
 **düz metin olarak hiçbir SQL dosyasında bulunmaz**; Supabase Vault'ta
 saklanır (Supabase docs: *Scheduling Edge Functions*).
 SQL Editor'da **bir kez**:
 
 ```sql
 select vault.create_secret('https://<project-ref>.supabase.co', 'dijivo_project_url');
-select vault.create_secret('<service_role_key>', 'dijivo_service_key');
+select vault.create_secret('<aynı-rastgele-cron-secret>', 'dijivo_cron_secret');
 ```
 
 - URL'nin sonunda eğik çizgi olmasın (0004 `rtrim` ile yine korur).
@@ -96,17 +96,25 @@ select vault.create_secret('<service_role_key>', 'dijivo_service_key');
   açık hata mesajıyla durar, kırık job kurmaz.
 - Secret değerleri repoya/commit'e **asla** girmez.
 
-### 2.2 Edge Function'ı deploy et
+### 2.2 Edge Function cron secret'ı ve deploy
+
+Önce güçlü bir rastgele değer üretin ve aynı değeri Edge Function secret'ı
+ve Vault `dijivo_cron_secret` olarak kullanın:
+
+```bash
+openssl rand -hex 32
+supabase secrets set CRON_SECRET=<aynı-rastgele-değer>
+```
 
 ```bash
 supabase functions deploy reminder-dispatch --no-verify-jwt
 ```
 
 **`--no-verify-jwt` neden gerekli:** cron çağrısı platform JWT'si değil,
-`apikey` header'ı ile gelir (service-to-service modeli). Function,
-gelen `apikey`'i kendi `SUPABASE_SERVICE_ROLE_KEY` değeriyle eşleştirir;
-eşleşmezse **401** döner. verify_jwt açık deploy ederseniz cron her
-dakika 401 alır.
+`x-cron-secret` header'ı ile gelir. Function bu değeri kendi
+`CRON_SECRET` değeriyle karşılaştırır; eşleşmezse **401** döner.
+`SUPABASE_SERVICE_ROLE_KEY` yalnızca function'ın PostgREST/RPC erişiminde
+kullanılır. verify_jwt açık deploy ederseniz cron her dakika 401 alır.
 
 ### 2.3 VAPID anahtarları
 
@@ -133,10 +141,16 @@ Güvenlik kuralları:
 
 Vault secret'ları (§2.1) ve Edge Function (§2.2) hazır olduktan sonra
 `supabase/migrations/202610020003_create_calendar_tables.sql`
-çalıştırıldıktan **sonra**, SQL Editor'da:
+çalıştırıldıktan **sonra**, SQL Editor'da önce:
 
 ```
 supabase/migrations/202610020004_schedule_reminder_dispatch.sql
+```
+
+Ardından mevcut cron job'unu özel secret modeline geçirmek için:
+
+```
+supabase/migrations/202610070007_secure_reminder_cron.sql
 ```
 
 Bu, `reminder-dispatch` işini `pg_cron` ile **her dakika** tetikler;
@@ -160,7 +174,7 @@ Dosya idempotenttir (eski job önce `unschedule` edilir).
 
 ```bash
 curl -X POST \
-  -H "apikey: <service_role_key>" \
+  -H "x-cron-secret: <aynı-rastgele-değer>" \
   -H "Content-Type: application/json" \
   https://<project-ref>.supabase.co/functions/v1/reminder-dispatch
 ```
@@ -174,7 +188,7 @@ Sorun giderme:
 
 | Belirti | Neden / Çözüm |
 | --- | --- |
-| `401 unauthorized` | Vault'taki key ≠ function'ın service-role key'i ya da verify_jwt ile deploy edildi → §2.2 |
+| `401 unauthorized` | `dijivo_cron_secret` ≠ Edge `CRON_SECRET` ya da verify_jwt ile deploy edildi → §2.2 |
 | `500 dispatch_rpc_failed` + `PGRST202` | `dispatch_due_reminders()` yok → 0003 migration'ını çalıştırın |
 | Job tetiklenmiyor | `select * from cron.job_run_details order by start_time desc limit 5;` |
 
@@ -219,6 +233,7 @@ cihazda açılabilir.
 | `SHARE_TTL_DAYS` | server | hayır |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | client | hayır (public anahtar) |
 | `VAPID_PRIVATE_KEY` | Edge Function secret | **evet** |
+| `CRON_SECRET` | Edge Function + Vault (`dijivo_cron_secret`) | **evet** |
 
 ---
 

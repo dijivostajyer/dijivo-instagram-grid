@@ -33,6 +33,13 @@ function stripSqlComments(sql: string): string {
 }
 
 const cronMigrationCode = stripSqlComments(cronMigrationSql);
+const secureCronMigrationSql = readFileSync(
+  path.resolve(
+    __dirname,
+    "../../supabase/migrations/202610070007_secure_reminder_cron.sql",
+  ),
+  "utf8",
+);
 
 const workerSource = readFileSync(
   path.resolve(__dirname, "../../supabase/functions/reminder-dispatch/index.ts"),
@@ -147,9 +154,9 @@ describe("reminder-dispatch Edge Function", () => {
     expect(workerSource).toContain('"dispatch_rpc_failed"');
   });
 
-  it("gelen çağrıyı handler-side apikey ile doğrular (--no-verify-jwt)", () => {
-    expect(workerSource).toContain("apikey");
-    expect(workerSource).toContain("SERVICE_ROLE_KEY");
+  it("gelen çağrıyı ayrı cron secret ile doğrular (--no-verify-jwt)", () => {
+    expect(workerSource).toContain("x-cron-secret");
+    expect(workerSource).toContain("CRON_SECRET");
     expect(workerSource).toContain('"unauthorized"');
     // 401 yolu gerçekten return edilmiş olmalı:
     expect(workerSource).toMatch(/jsonError\(401,\s*"unauthorized"\)/);
@@ -164,11 +171,21 @@ describe("reminder-dispatch Edge Function", () => {
   });
 });
 
+describe("özel cron secret migration'ı (202610070007)", () => {
+  it("cron auth için service role yerine Vault cron secret gönderir", () => {
+    expect(secureCronMigrationSql).toContain("dijivo_cron_secret");
+    expect(secureCronMigrationSql).toContain("x-cron-secret");
+    expect(secureCronMigrationSql).not.toContain("Authorization");
+    expect(secureCronMigrationSql).not.toContain("dijivo_service_key");
+  });
+});
+
 describe("SUPABASE-KURULUM.md koşu kitabı", () => {
   it("--no-verify-jwt deploy ve Vault secret adımlarını belgeler", () => {
     expect(runbook).toContain("--no-verify-jwt");
     expect(runbook).toContain("vault.create_secret");
-    expect(runbook).toContain("dijivo_service_key");
+    expect(runbook).toContain("dijivo_cron_secret");
+    expect(runbook).toContain("202610070007_secure_reminder_cron.sql");
   });
 
   it("RPC adını ve SQL Editor sırasını belgeler", () => {

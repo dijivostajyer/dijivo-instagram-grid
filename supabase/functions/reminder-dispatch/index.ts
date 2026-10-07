@@ -40,6 +40,7 @@ import webpush from "npm:web-push@3.6.7";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const CRON_SECRET = Deno.env.get("CRON_SECRET");
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY");
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY");
 
@@ -84,15 +85,25 @@ function pushConfigured(): boolean {
 
 /**
  * Handler-side auth (`--no-verify-jwt` deploy edildiği için platform
- * kontrolü kapalıdır). Cron çağrısı `apikey` header'ıyla service-role
- * anahtarını taşır; `Authorization: Bearer` da desteklenir.
+ * kontrolü kapalıdır). Cron için service-role anahtarı kullanılmaz;
+ * yalnızca Vault'taki eş değeri Edge secret olarak saklanan CRON_SECRET
+ * kabul edilir. Service-role anahtarı sadece PostgREST çağrılarına aittir.
  */
-function isAuthorized(request: Request): boolean {
-  const presented =
-    request.headers.get("apikey") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    "";
-  return presented.length > 0 && presented === SERVICE_ROLE_KEY;
+async function isAuthorized(request: Request): Promise<boolean> {
+  const presented = request.headers.get("x-cron-secret");
+  if (!CRON_SECRET || !presented) return false;
+  const encoder = new TextEncoder();
+  const [expected, actual] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(CRON_SECRET)),
+    crypto.subtle.digest("SHA-256", encoder.encode(presented)),
+  ]);
+  const expectedBytes = new Uint8Array(expected);
+  const actualBytes = new Uint8Array(actual);
+  let difference = 0;
+  for (let index = 0; index < expectedBytes.length; index += 1) {
+    difference |= expectedBytes[index] ^ actualBytes[index];
+  }
+  return difference === 0;
 }
 
 function jsonError(status: number, error: string, detail?: string): Response {
@@ -103,7 +114,7 @@ function jsonError(status: number, error: string, detail?: string): Response {
 }
 
 Deno.serve(async (request) => {
-  if (!isAuthorized(request)) {
+  if (!(await isAuthorized(request))) {
     return jsonError(401, "unauthorized");
   }
 
