@@ -16,7 +16,7 @@
 --
 --   -- 1) Vault secret'ları (değerleri bu dosyaya asla gömme):
 --   select vault.create_secret('https://<project-ref>.supabase.co', 'dijivo_project_url');
---   select vault.create_secret('<service-role veya secret key>', 'dijivo_service_key');
+--   select vault.create_secret('<SUPABASE_SERVICE_ROLE_KEY>', 'dijivo_service_key');
 --
 --   -- 2) Edge Function deploy (verify_jwt KAPALI; auth handler-side):
 --   --      supabase functions deploy reminder-dispatch --no-verify-jwt
@@ -91,7 +91,11 @@ where jobname = 'reminder-dispatch';
 --   supabase/functions/reminder-dispatch  →  /functions/v1/reminder-dispatch
 -- (deploy komutu: `supabase functions deploy reminder-dispatch`).
 --
--- Auth: service-to-service çağrılar `apikey` header'ıyla yapılır
+-- Auth: service-to-service çağrılar `apikey` header'ıyla yapılır.
+-- `dijivo_service_key`, Edge Function'ın otomatik sağlanan
+-- `SUPABASE_SERVICE_ROLE_KEY` değeriyle BİREBİR aynı olmalıdır. Modern
+-- `sb_secret_...` anahtarını burada kullanmayın: handler bu opaque anahtarı
+-- doğrulayamaz ve 401 döner.
 -- (Supabase docs: "Securing Edge Functions" — cron/pg_net çağrıları JWT
 -- değil, apikey taşır). Function `--no-verify-jwt` ile deploy edilir ve
 -- anahtarı handler içinde doğrular.

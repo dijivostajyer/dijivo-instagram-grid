@@ -175,6 +175,12 @@ Deno.serve(async (request) => {
               pushed += 1;
             } catch (error) {
               const status = (error as { statusCode?: number }).statusCode;
+              console.error("[reminder-dispatch] push_failed", {
+                deliveryId: row.id,
+                subscriptionId: subscription.id,
+                status: status ?? null,
+                message: error instanceof Error ? error.message : String(error),
+              });
               // 404/410: abonelik artık geçerli değil → temizle.
               if (status === 404 || status === 410) {
                 await postgrest(`push_subscriptions?id=eq.${subscription.id}`, {

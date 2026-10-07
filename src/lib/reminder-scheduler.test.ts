@@ -160,6 +160,7 @@ describe("reminder-dispatch Edge Function", () => {
     expect(workerSource).toContain("webpush.sendNotification");
     expect(workerSource).toContain("status === 404 || status === 410");
     expect(workerSource).toContain("push_subscriptions?id=eq.");
+    expect(workerSource).toContain("[reminder-dispatch] push_failed");
   });
 });
 

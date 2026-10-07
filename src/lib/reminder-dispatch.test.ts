@@ -28,6 +28,13 @@ const calendarMigrationSql = readFileSync(
   ),
   "utf8",
 );
+const channelMigrationSql = readFileSync(
+  path.resolve(
+    __dirname,
+    "../../supabase/migrations/202610070006_reminder_delivery_channels.sql",
+  ),
+  "utf8",
+);
 
 /** Migration içindeki dispatch_due_reminders() fonksiyon gövdesi. */
 const dispatchFnSql = calendarMigrationSql.slice(
@@ -66,6 +73,13 @@ describe("kanal mimarisi (in_app / browser_push / email)", () => {
     expect(shouldAttemptChannel("browser_push", false, false)).toBe(false);
     expect(shouldAttemptChannel("email", true, false)).toBe(false);
     expect(shouldAttemptChannel("email", true, true)).toBe(true);
+  });
+});
+
+describe("teslimat kanal eşsizliği", () => {
+  it("aynı reminder için uygulama içi ve browser push satırlarını ayırır", () => {
+    expect(channelMigrationSql).toContain("drop constraint if exists reminder_deliveries_once");
+    expect(channelMigrationSql).toContain("unique (item_id, remind_at, channel)");
   });
 });
 
