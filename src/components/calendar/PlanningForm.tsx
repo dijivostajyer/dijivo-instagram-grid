@@ -93,9 +93,23 @@ export default function PlanningForm({
         ? String(editing.reminderOffsetMinutes)
         : "custom",
   );
-  const [customDays, setCustomDays] = useState("");
-  const [customHours, setCustomHours] = useState("");
-  const [customMinutes, setCustomMinutes] = useState("");
+  // Düzenleme modunda özel hatırlatıcıyı tekrar kaydetmek, önceden boş
+  // alanların 0'a dönüşüp hatırlatıcıyı kaybettirmemelidir.
+  const [customDays, setCustomDays] = useState(
+    editing && ![15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes ?? 0)
+      ? String(Math.floor((editing.reminderOffsetMinutes ?? 0) / 1440))
+      : "",
+  );
+  const [customHours, setCustomHours] = useState(
+    editing && ![15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes ?? 0)
+      ? String(Math.floor(((editing.reminderOffsetMinutes ?? 0) % 1440) / 60))
+      : "",
+  );
+  const [customMinutes, setCustomMinutes] = useState(
+    editing && ![15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes ?? 0)
+      ? String((editing.reminderOffsetMinutes ?? 0) % 60)
+      : "",
+  );
   const [checklist, setChecklist] = useState<ChecklistItem[]>(
     editing?.checklist ?? [],
   );
@@ -139,7 +153,7 @@ export default function PlanningForm({
 
   const reminderOffsetMinutes = useMemo((): number | null => {
     if (reminderValue === "") return null;
-    if (reminderValue === "custom") {
+    if (reminderValue === "custom" || reminderValue === "-1") {
       const days = Number(customDays) || 0;
       const hours = Number(customHours) || 0;
       const minutes = Number(customMinutes) || 0;
@@ -418,7 +432,9 @@ export default function PlanningForm({
             <select
               id="planning-reminder"
               value={reminderValue}
-              onChange={(event) => setReminderValue(event.target.value)}
+              onChange={(event) =>
+                setReminderValue(event.target.value === "-1" ? "custom" : event.target.value)
+              }
               className={inputClass}
             >
               {REMINDER_OPTIONS.map((option) => (

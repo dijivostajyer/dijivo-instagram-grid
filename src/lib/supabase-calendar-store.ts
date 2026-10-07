@@ -50,6 +50,7 @@ function rowToItem(row: CalendarItemRow): CalendarItem {
     scheduledAt: row.scheduled_at,
     status: row.status,
     reminderOffsetMinutes: row.reminder_offset_minutes,
+    remindAt: row.remind_at ?? null,
     checklist: row.checklist ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -102,7 +103,7 @@ export function createSupabaseCalendarDriver(
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const ITEM_SELECT =
-    "id,brand_id,project_id,post_id,item_type,title,description,scheduled_at,status,reminder_offset_minutes,checklist,created_at,updated_at";
+    "id,brand_id,project_id,post_id,item_type,title,description,scheduled_at,status,reminder_offset_minutes,remind_at,checklist,created_at,updated_at";
   const DELIVERY_SELECT =
     "id,item_id,brand_id,channel,remind_at,scheduled_at,title,body,created_at,delivered_at,read_at";
 

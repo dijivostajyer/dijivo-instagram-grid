@@ -38,6 +38,8 @@ export interface CalendarItem {
   status: CalendarStatus;
   /** Hatırlatma ön süresi (dakika); null = hatırlatma yok (§12). */
   reminderOffsetMinutes: number | null;
+  /** Sunucunun hesapladığı teslim anı; `null` = hatırlatma yok. */
+  remindAt?: string | null;
   checklist: ChecklistItem[];
   createdAt: string;
   updatedAt: string;
@@ -140,6 +142,7 @@ export interface CalendarItemRow {
   scheduled_at: string;
   status: CalendarStatus;
   reminder_offset_minutes: number | null;
+  remind_at?: string | null;
   checklist: ChecklistItem[];
   created_at: string;
   updated_at: string;
