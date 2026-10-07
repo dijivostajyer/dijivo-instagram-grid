@@ -9,7 +9,24 @@ import {
 } from "react";
 
 import { createApiCalendarStore } from "@/lib/api-calendar-store";
-import { reminderAt } from "@/lib/calendar-utils";
+import { deliveryKey, selectDueReminders } from "@/lib/calendar-backend";
+import type { CalendarItemType } from "@/lib/calendar-types";
+
+/** Tür → görünen ad; Edge Function SQL'i ile aynı metinleri üretir. */
+export function reminderBodyLabel(itemType: CalendarItemType): string {
+  switch (itemType) {
+    case "task":
+      return "Görev";
+    case "note":
+      return "Not";
+    case "story":
+      return "Story";
+    case "reel":
+      return "Reel";
+    default:
+      return "Post";
+  }
+}
 import {
   LocalCalendarStore,
   type CalendarItemInput,
@@ -22,16 +39,13 @@ import {
   notificationPermission,
   requestNotificationPermission,
   showBrowserNotification,
-} from "@/lib/browser-push";
-
-/** Hatırlatma döngüsü aralığı (§27). */
-const REMINDER_POLL_MS = 15_000;
-/**
- * Geç kaldı Window: planlama zamanından önce oluşturulan
- * kayıtların eski hatırlatmaları 12 saatten eskiyse
- * teslim edilmez (spam önleyici).
+} from "@/lib/browser-push";/**
+ * İstemci yedeği poll aralığı (§27). **Bu birincil teslimat yolu
+ * değildir** — arka plan teslimatı backend işçisindedir
+ * (`supabase/functions/reminder-dispatch`, pg_cron ile her dakika).
+ * Poll yalnızca uygulama açıkken geç kalan kayıtları yakalar.
  */
-const REMINDER_LATE_WINDOW_MS = 12 * 60 * 60 * 1000;
+const REMINDER_POLL_MS = 15_000;
 
 export type CalendarLoadState = "idle" | "loading" | "ready" | "error";
 
@@ -183,45 +197,53 @@ export function useCalendarStore(
    * once-only olarak teslim eder; in-app bildirim +
    * (izin verildiyse) tarayıcı bildirimi çıkarır.
    */
+  /**
+   * İstemci yedeği: uygulama/sekme açıkken vadesi gelen hatırlatmaları
+   * gösterir. **Birincil teslimat sahibi backend işçisidir**
+   * (`supabase/functions/reminder-dispatch`); burada kullanılan
+   * `selectDueReminders` saf mantığı aynı `itemId|remindAt` anahtarını
+   * kullandığı için backend'in teslim ettiği bir hatırlatma burada
+   * tekrar gönderilmez.
+   */
   useEffect(() => {
     if (!store) return;
     let cancelled = false;
     const deliverDue = async () => {
       if (cancelled) return;
-      const now = Date.now();
       const activeDeliveries = deliveriesRef.current;
       const delivered = new Set(
-        activeDeliveries.map(
-          (delivery) => `${delivery.itemId}|${delivery.remindAt}`,
+        activeDeliveries.map((delivery) =>
+          deliveryKey(delivery.itemId, delivery.remindAt),
         ),
       );
       for (const key of deliveredKeysRef.current) delivered.add(key);
-      for (const item of brandItemsRef.current) {
-        if (item.brandId !== brandId) continue;
-        if (item.reminderOffsetMinutes == null) continue;
-        const remindAt = reminderAt(item.scheduledAt, item.reminderOffsetMinutes);
-        const remindTime = remindAt.getTime();
-        if (Number.isNaN(remindTime)) continue;
-        if (remindTime > now) continue;
-        if (remindTime < now - REMINDER_LATE_WINDOW_MS) continue;
-        const key = `${item.id}|${remindAt.toISOString()}`;
-        if (delivered.has(key)) continue;
-        delivered.add(key);
-        deliveredKeysRef.current.add(key);
+      const due = selectDueReminders(
+        brandItemsRef.current,
+        delivered,
+        Date.now(),
+        brandId,
+      );
+      for (const candidate of due) {
+        deliveredKeysRef.current.add(
+          deliveryKey(candidate.itemId, candidate.remindAt),
+        );
+        const source = brandItemsRef.current.find(
+          (item) => item.id === candidate.itemId,
+        );
         try {
           const delivery = await store.deliverReminder({
-            itemId: item.id,
+            itemId: candidate.itemId,
             brandId,
             channel: "in_app",
-            remindAt: remindAt.toISOString(),
-            scheduledAt: item.scheduledAt,
-            title: item.title,
-            body: `${item.itemType === "task" ? "Görev" : item.itemType === "note" ? "Not" : item.itemType === "story" ? "Story" : item.itemType === "reel" ? "Reel" : "Post"} hatırlatması`,
+            remindAt: candidate.remindAt,
+            scheduledAt: source?.scheduledAt ?? candidate.remindAt,
+            title: candidate.title,
+            body: `${reminderBodyLabel(candidate.itemType)} hatırlatması`,
           });
           setDeliveries((previous) => [delivery, ...previous]);
           // §29: uygulama açıkken tarayıcı bildirimi (izin varsa).
           showBrowserNotification(
-            `Hatırlatma: ${item.title}`,
+            `Hatırlatma: ${candidate.title}`,
             delivery.body,
           );
           onReminderRef.current?.(delivery);
@@ -243,10 +265,12 @@ export function useCalendarStore(
     };
   }, [store, brandId]);
 
+  // Arka plan teslimatı icin abonelik brand'a bağlanır: Edge Function
+  // `push_subscriptions.brand_id` üzerinden hedef cihazları seçer.
   const enableBrowserNotifications = useCallback(async () => {
-    const permission = await requestNotificationPermission();
+    const permission = await requestNotificationPermission(brandId);
     setBrowserPermission(permission);
-  }, []);
+  }, [brandId]);
 
   /** §36: optimistic create — hata durumunda rollback. */
   const createItem = useCallback(

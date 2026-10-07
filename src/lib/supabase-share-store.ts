@@ -133,7 +133,13 @@ export class SupabaseShareStore implements ShareStore {
     let totalVideos = 0;
     let imageIndex = 0;
     let mediaIndex = 0;
+    // Reel hücresinde kapak hem `imageUrl` hem `coverImageUrl` alanında bulunur;
+    // aynı bayt iki kez yüklenmesin diye HÜCRE içinde data URL → storage eşlemesi tutulur.
+    // Farklı hücreler ayrı yüklenir (her hücre kendi paylaşım nesnesidir).
+    const makeConverters = (cache: Map<string, string>) => {
     const convertImage = async (url: string): Promise<string> => {
+      const cached = cache.get(url);
+      if (cached) return cached;
       const image = dataImage(url);
       if (url.startsWith("data:image/") && !image) throw new Error("Paylaşım görseli geçersiz.");
       if (!image) return url;
@@ -144,9 +150,13 @@ export class SupabaseShareStore implements ShareStore {
       imageIndex += 1;
       await this.driver.upload(path, image.bytes, image.mime);
       uploadedImages.push(path);
-      return `storage:${path}`;
+      const stored = `storage:${path}`;
+      cache.set(url, stored);
+      return stored;
     };
     const convertVideo = async (url: string): Promise<string> => {
+      const cached = cache.get(url);
+      if (cached) return cached;
       const video = dataVideo(url);
       if (url.startsWith("data:video/") && !video) throw new Error("Paylaşım videosu geçersiz.");
       if (!video) return url;
@@ -157,18 +167,24 @@ export class SupabaseShareStore implements ShareStore {
       mediaIndex += 1;
       await this.driver.uploadMedia(path, video.bytes, video.mime);
       uploadedMedia.push(path);
-      return `storage:${path}`;
+      const stored = `storage:${path}`;
+      cache.set(url, stored);
+      return stored;
+    };
+    return { convertImage, convertVideo };
     };
     const cells = [];
     for (const cell of input.cells) {
+      const { convertImage, convertVideo } = makeConverters(new Map<string, string>());
       const videoUrl = cell.videoUrl ? await convertVideo(cell.videoUrl) : undefined;
       const coverImageUrl = cell.coverImageUrl ? await convertImage(cell.coverImageUrl) : undefined;
       cells.push({ ...cell, imageUrl: await convertImage(cell.imageUrl), videoUrl, coverImageUrl });
     }
+    const brandConverters = makeConverters(new Map<string, string>());
     return {
       brand: {
         ...input.brand,
-        profileImageUrl: input.brand.profileImageUrl ? await convertImage(input.brand.profileImageUrl) : undefined,
+        profileImageUrl: input.brand.profileImageUrl ? await brandConverters.convertImage(input.brand.profileImageUrl) : undefined,
       },
       cells,
     };
