@@ -96,6 +96,18 @@ SUPABASE_WORKSPACE_MEDIA_BUCKET=workspace-media
 
 Medya nesneleri `<auth.uid()>/<brandId>/<...>` mantığında private bucket’a yazılır. Image/video için kısa ömürlü signed URL kullanılır; 100 MB Reel yüklemeleri JSON/base64 yerine doğrudan signed binary upload ile aktarılır.
 
+### İlk hesap ve teslim öncesi reset
+
+İlk hesap yalnızca sistemde hiç Supabase Auth kullanıcısı yokken gösterilir. Uygulama `/api/auth/bootstrap` üzerinden server-side singleton kilit ile ilk e-posta/şifre hesabını oluşturur; service-role anahtarı tarayıcıya gönderilmez. İlk kullanıcı oluşturulduktan sonra signup düğmesi kapanır. Supabase Dashboard’da genel **email signup** seçeneğini kapalı tutun; sonraki kullanıcılar yalnız mevcut hesabın giriş bilgileriyle oturum açar.
+
+Yeni müşteriye teslimden önce test verisini temizlemek için:
+
+1. Supabase Dashboard → Authentication → Users’dan test kullanıcısını silin.
+2. SQL Editor’da yalnız test kullanıcısına ait satırları temizleyin: `workspace_posts`, `workspace_highlights`, `workspace_projects`, `workspace_brands` ve `workspace_prefs`. `workspace_bootstrap` singleton satırını da silin; böylece yeni müşterinin ilk hesabı oluşturulabilir.
+3. Storage → `workspace-media` içinde yalnız test kullanıcısının UUID ön ekli klasörünü silin. Test paylaşım linkleri varsa `share_snapshots`, `share-images` ve `share-media` içindeki test tokenlarını da temizleyin.
+4. **Asla** migration dosyalarını, `workspace_*` tablo şemalarını, bucket’ları, RLS politikalarını veya `auth` altyapısını silmeyin. Reset yalnız test satırları/nesneleri için uygulanır.
+5. Temiz sistemde uygulamayı açın; görünen **İlk hesabı oluştur** düğmesinden müşterinin e-posta ve şifresiyle ilk hesabı oluşturun. Sonrasında düğme görünmez ve normal **Giriş yap** akışı kullanılır.
+
 ---
 
 ## Supabase Entegrasyonu

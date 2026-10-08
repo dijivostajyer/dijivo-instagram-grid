@@ -12,6 +12,7 @@ export default function AuthGate() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [canBootstrap, setCanBootstrap] = useState<boolean | null>(null);
   const supabase = getSupabaseBrowserClient();
 
   useEffect(() => {
@@ -20,6 +21,18 @@ export default function AuthGate() {
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
     return () => subscription.subscription.unsubscribe();
   }, [supabase]);
+
+  useEffect(() => {
+    if (session !== null) return;
+    let cancelled = false;
+    void fetch("/api/auth/bootstrap", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : { canBootstrap: false })
+      .then((data: { canBootstrap?: boolean }) => {
+        if (!cancelled) setCanBootstrap(data.canBootstrap === true);
+      })
+      .catch(() => { if (!cancelled) setCanBootstrap(false); });
+    return () => { cancelled = true; };
+  }, [session]);
 
   if (session === undefined) return <main className="min-h-screen grid place-items-center">Yükleniyor…</main>;
   const handleLogout = async () => {
@@ -36,7 +49,7 @@ export default function AuthGate() {
     if (result.error) setMessage(result.error.message);
   };
 
-  const handleSignUp = async () => {
+  const handleBootstrap = async () => {
     const normalizedEmail = email.trim();
     if (!normalizedEmail) {
       setMessage("E-posta adresi gerekli.");
@@ -47,13 +60,22 @@ export default function AuthGate() {
       return;
     }
     setBusy(true); setMessage(null);
-    const result = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password,
+    const response = await fetch("/api/auth/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: normalizedEmail, password }),
     });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      setBusy(false);
+      setCanBootstrap(false);
+      setMessage(body?.error ?? "İlk hesap oluşturulamadı.");
+      return;
+    }
+    const result = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
     setBusy(false);
     if (result.error) setMessage(result.error.message);
-    else if (!result.data.session) setMessage("Hesap oluşturuldu. E-posta doğrulamasını tamamlayın.");
+    else setMessage("Hesap oluşturuldu. Giriş yapılıyor…");
   };
 
   if (session) {
@@ -68,7 +90,7 @@ export default function AuthGate() {
       <label className="mt-3 block text-sm">Şifre<input required minLength={6} type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded border p-2" /></label>
       {message && <p className="mt-3 text-sm text-rose-700">{message}</p>}
       <button disabled={busy} className="mt-5 w-full rounded bg-slate-900 p-2 text-white">Giriş yap</button>
-      <button type="button" disabled={busy} onClick={() => void handleSignUp()} className="mt-3 w-full text-sm underline">İlk hesabı oluştur</button>
+      {canBootstrap === true && <button type="button" disabled={busy} onClick={() => void handleBootstrap()} className="mt-3 w-full text-sm underline">İlk hesabı oluştur</button>}
     </form>
   </main>;
 }

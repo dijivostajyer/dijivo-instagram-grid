@@ -265,4 +265,21 @@ describe("prepareShareInput — hata durumları", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
-});
+});
+
+describe("prepareShareInput — cross-device workspace medyası", () => {
+  it("signed workspace-media URL'sini taşınabilir share data URL'ine dönüştürür", async () => {
+    const restore = stubBtoa();
+    try {
+      const signed = "https://project.supabase.co/storage/v1/object/sign/workspace-media/user/brand/post.png?token=test";
+      const input = await prepareShareInput(
+        BRAND,
+        computeGrid([{ ...EXISTING[0], imageUrl: signed }], []),
+        { reader: readerFor({ [signed]: { bytes: PNG, mime: "image/png" } }) },
+      );
+      expect(input.cells[0].imageUrl).toBe(`data:image/png;base64,${b64(PNG)}`);
+    } finally {
+      restore();
+    }
+  });
+});

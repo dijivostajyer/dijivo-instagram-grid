@@ -6,9 +6,21 @@ import {
   MAX_SHARE_TOTAL_VIDEO_BYTES,
 } from "@/lib/share";
 import { getShareStore } from "@/lib/share-store";
+import { createClient } from "@supabase/supabase-js";
+
+async function isAuthenticated(request: Request): Promise<boolean> {
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const url = process.env.SUPABASE_URL?.trim();
+  const secret = process.env.SUPABASE_SECRET_KEY?.trim();
+  if (!token || !url || !secret) return false;
+  const client = createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await client.auth.getUser(token);
+  return !error && Boolean(data.user);
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: "Paylaşım oluşturmak için giriş yapın." }, { status: 401 });
     const raw = await request.text();
     const bodyBytes = new TextEncoder().encode(raw).byteLength;
     // Videolar base64 data URL olarak gelir; görsel + video toplam sınırı

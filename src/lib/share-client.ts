@@ -29,6 +29,7 @@ import {
   type ShareSnapshotInput,
 } from "./share";
 import type { Brand, GridResult } from "./types";
+import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "./workspace-media-store";
 
 export interface ResolvedMedia {
   bytes: Uint8Array;
@@ -64,6 +65,10 @@ function isLocal(url: string): boolean {
   );
 }
 
+function isWorkspaceMediaUrl(url: string): boolean {
+  return url.startsWith("storage:workspace-media/") || url.includes("/storage/v1/object/sign/workspace-media/");
+}
+
 /**
  * Tarayıcı varsayılan okuyucu: `blob:` fetch ile, `idb:` /
  * `idb-video:` IndexedDB'den okunur. MIME tipi içerik baytlarından
@@ -75,7 +80,7 @@ export function createBrowserMediaReader(
 ): LocalMediaReader {
   return async (url) => {
     let blob: Blob | null = null;
-    if (url.startsWith("blob:")) {
+    if (url.startsWith("blob:") || /^https?:/i.test(url)) {
       const response = await fetchImage(url);
       if (!response.ok) throw new ShareMediaPrepareError("Yüklenen medya okunamadı.");
       blob = await response.blob();
@@ -209,8 +214,10 @@ export async function prepareShareInput(
     kind: "image" | "video",
     fallbackImage?: string,
   ): Promise<string | undefined> => {
-    if (url === undefined || !isLocal(url)) return url;
-    const media = await reader(url);
+    if (url === undefined) return url;
+    const source = isWorkspaceMediaRef(url) ? await resolveWorkspaceMedia(url) : url;
+    if (!isLocal(source) && !isWorkspaceMediaUrl(source)) return source;
+    const media = await reader(source);
     if (media === null) {
       throw new ShareMediaPrepareError("Yüklenen medya okunamadı.");
     }
@@ -259,4 +266,4 @@ export async function prepareShareInput(
 }
 
 /** Test/harness yardımcısı: uzantı eşlemesini dışa açar. */
-export { imageExtension, videoExtension };
+export { imageExtension, videoExtension };

@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { ClipboardDocumentIcon, ShareIcon } from "@heroicons/react/16/solid";
 
 import { prepareShareInput } from "@/lib/share-client";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { Brand, GridResult } from "@/lib/types";
 
 /**
@@ -42,6 +43,11 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const authHeaders = useCallback(async (): Promise<HeadersInit> => {
+    const session = (await getSupabaseBrowserClient()?.auth.getSession())?.data.session;
+    return session ? { Authorization: `Bearer ${session.access_token}` } : {};
+  }, []);
+
   const createLink = useCallback(async () => {
     if (result.cells.length === 0) {
       setMessage("Grid boşken paylaşım bağlantısı oluşturulamaz.");
@@ -53,7 +59,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
       const input = await prepareShareInput(brand, result);
       const response = await fetch("/api/shares", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...await authHeaders() },
         body: JSON.stringify(input),
       });
       const body: unknown = await response.json();
@@ -72,13 +78,13 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     } finally {
       setBusy(false);
     }
-  }, [brand, result]);
+  }, [authHeaders, brand, result]);
 
   const revokeLink = useCallback(async () => {
     if (!token) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/shares/${token}`, { method: "DELETE" });
+      const response = await fetch(`/api/shares/${token}`, { method: "DELETE", headers: await authHeaders() });
       if (!response.ok) throw new Error("Paylaşım bağlantısı kaldırılamadı.");
       setLink(null);
       setToken(null);
@@ -90,7 +96,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     } finally {
       setBusy(false);
     }
-  }, [token]);
+  }, [authHeaders, token]);
 
   const copyLink = useCallback(async () => {
     if (!link) return;
