@@ -215,14 +215,14 @@ export class SupabaseShareStore implements ShareStore {
 export function createSupabaseShareDriver(config: ShareStorageConfig = getShareStorageConfig()): SupabaseShareDriver {
   const client = createClient(config.url, config.secretKey, { auth: { persistSession: false, autoRefreshToken: false } });
   return {
-    async upload(path, body, contentType) { const { error } = await client.storage.from(config.bucket).upload(path, body, { contentType, upsert: false }); if (error) throw new Error("Storage upload başarısız."); },
-    async uploadMedia(path, body, contentType) { const { error } = await client.storage.from(config.mediaBucket).upload(path, body, { contentType, upsert: false }); if (error) throw new Error("Storage video upload başarısız."); },
-    async remove(paths) { const { error } = await client.storage.from(config.bucket).remove(paths); if (error) throw new Error("Storage cleanup başarısız."); },
-    async removeMedia(paths) { const { error } = await client.storage.from(config.mediaBucket).remove(paths); if (error) throw new Error("Storage video cleanup başarısız."); },
-    async insert(row) { const { error } = await client.from("share_snapshots").insert(row); if (error) throw new Error(error.code === "23505" ? "duplicate token" : "Snapshot insert başarısız."); },
-    async find(token) { const { data, error } = await client.from("share_snapshots").select("token,version,created_at,payload,expires_at,revoked_at").eq("token", token).maybeSingle(); if (error) throw new Error("Snapshot okuma başarısız."); return data as SnapshotRow | null; },
-    async sign(path, seconds) { const { data, error } = await client.storage.from(config.bucket).createSignedUrl(path, seconds); if (error || !data) throw new Error("Signed URL üretilemedi."); return data.signedUrl; },
-    async signMedia(path, seconds) { const { data, error } = await client.storage.from(config.mediaBucket).createSignedUrl(path, seconds); if (error || !data) throw new Error("Video signed URL üretilemedi."); return data.signedUrl; },
-    async revoke(token, revokedAt) { const { error } = await client.from("share_snapshots").update({ revoked_at: revokedAt }).eq("token", token); if (error) throw new Error("Snapshot revoke başarısız."); },
+    async upload(path, body, contentType) { const { error } = await client.storage.from(config.bucket).upload(path, body, { contentType, upsert: false }); if (error) throw new Error(`share-images upload başarısız: ${error.message}`); },
+    async uploadMedia(path, body, contentType) { const { error } = await client.storage.from(config.mediaBucket).upload(path, body, { contentType, upsert: false }); if (error) throw new Error(`share-media upload başarısız: ${error.message}`); },
+    async remove(paths) { const { error } = await client.storage.from(config.bucket).remove(paths); if (error) throw new Error(`share-images cleanup başarısız: ${error.message}`); },
+    async removeMedia(paths) { const { error } = await client.storage.from(config.mediaBucket).remove(paths); if (error) throw new Error(`share-media cleanup başarısız: ${error.message}`); },
+    async insert(row) { const { error } = await client.from("share_snapshots").insert(row); if (error) throw new Error(error.code === "23505" ? "duplicate token" : `share_snapshots insert başarısız: ${error.message}`); },
+    async find(token) { const { data, error } = await client.from("share_snapshots").select("token,version,created_at,payload,expires_at,revoked_at").eq("token", token).maybeSingle(); if (error) throw new Error(`share_snapshots okuma başarısız: ${error.message}`); return data as SnapshotRow | null; },
+    async sign(path, seconds) { const { data, error } = await client.storage.from(config.bucket).createSignedUrl(path, seconds); if (error || !data) throw new Error(`share-images signed URL üretilemedi: ${error?.message ?? "bilinmeyen hata"}`); return data.signedUrl; },
+    async signMedia(path, seconds) { const { data, error } = await client.storage.from(config.mediaBucket).createSignedUrl(path, seconds); if (error || !data) throw new Error(`share-media signed URL üretilemedi: ${error?.message ?? "bilinmeyen hata"}`); return data.signedUrl; },
+    async revoke(token, revokedAt) { const { error } = await client.from("share_snapshots").update({ revoked_at: revokedAt }).eq("token", token); if (error) throw new Error(`share_snapshots revoke başarısız: ${error.message}`); },
   };
 }

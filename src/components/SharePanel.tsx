@@ -25,11 +25,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isTokenResponse(value: unknown): value is { token: string } {
+function isTokenResponse(value: unknown): value is { token: string; requestId?: string } {
   return isRecord(value) && typeof value.token === "string";
 }
 
-function isErrorResponse(value: unknown): value is { error: string } {
+function isErrorResponse(value: unknown): value is { error: string; code?: string; requestId?: string } {
   return isRecord(value) && typeof value.error === "string";
 }
 
@@ -44,8 +44,12 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
   const [busy, setBusy] = useState(false);
 
   const authHeaders = useCallback(async (): Promise<HeadersInit> => {
-    const session = (await getSupabaseBrowserClient()?.auth.getSession())?.data.session;
-    return session ? { Authorization: `Bearer ${session.access_token}` } : {};
+    const client = getSupabaseBrowserClient();
+    const { data, error } = await client?.auth.getSession() ?? {};
+    if (error || !data?.session?.access_token) {
+      throw new Error("Paylaşım için oturum doğrulanamadı. Lütfen çıkış yapıp tekrar giriş yapın.");
+    }
+    return { Authorization: `Bearer ${data.session.access_token}` };
   }, []);
 
   const createLink = useCallback(async () => {
@@ -57,6 +61,11 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     setMessage(null);
     try {
       const input = await prepareShareInput(brand, result);
+      console.info("[share] İstemci payload hazır", {
+        cells: input.cells.length,
+        hasVideo: input.cells.some((cell) => Boolean(cell.videoUrl)),
+        hasWorkspaceMediaRef: JSON.stringify(input).includes("storage:workspace-media/"),
+      });
       const response = await fetch("/api/shares", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...await authHeaders() },
@@ -64,10 +73,13 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
       });
       const body: unknown = await response.json();
       if (!response.ok || !isTokenResponse(body)) {
+        console.error("[share] POST /api/shares başarısız", { status: response.status, body });
+        const trace = isErrorResponse(body) && body.requestId ? ` (tanılama: ${body.requestId})` : "";
         throw new Error(
-          isErrorResponse(body) ? body.error : "Paylaşım bağlantısı oluşturulamadı.",
+          `${isErrorResponse(body) ? body.error : "Paylaşım bağlantısı oluşturulamadı."}${trace}`,
         );
       }
+      console.info("[share] POST /api/shares başarılı", { requestId: isRecord(body) ? body.requestId : undefined });
       setLink(`${window.location.origin}/share/${body.token}`);
       setToken(body.token);
       setMessage("Salt-okunur paylaşım bağlantısı hazır.");
