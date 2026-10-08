@@ -87,6 +87,7 @@ SUPABASE_WORKSPACE_MEDIA_BUCKET=workspace-media
 ```
 
 `SUPABASE_SECRET_KEY` veya `service_role` anahtarını `NEXT_PUBLIC_` ile başlayan bir değişkene koymayın. Workspace CRUD ve Storage erişimi, tarayıcıdaki Auth oturumu ile RLS üzerinden yapılır.
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` adı Supabase'in public/anon API anahtarının teknik adıdır; **anonymous sign-in değildir**. Bu uygulama yalnız email + password ile `signUp` ve `signInWithPassword` çağrıları yapar.
 
 1. Supabase Dashboard → Authentication → Providers bölümünde **Email** sağlayıcısını etkinleştirin.
 2. `supabase/migrations/202610080002_create_workspace_persistence.sql` migration'ını SQL Editor’da çalıştırın. Migration workspace tablolarını, `user_id` ilişkisini, RLS politikalarını ve private `workspace-media` bucket’ını oluşturur.
