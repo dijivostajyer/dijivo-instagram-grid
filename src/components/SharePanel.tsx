@@ -5,6 +5,7 @@ import { ClipboardDocumentIcon, ShareIcon } from "@heroicons/react/16/solid";
 
 import { prepareShareInput } from "@/lib/share-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { withBasePath } from "@/lib/base-path";
 import type { Brand, GridResult } from "@/lib/types";
 
 /**
@@ -66,7 +67,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
         hasVideo: input.cells.some((cell) => Boolean(cell.videoUrl)),
         hasWorkspaceMediaRef: JSON.stringify(input).includes("storage:workspace-media/"),
       });
-      const response = await fetch("/api/shares", {
+      const response = await fetch(withBasePath("/api/shares"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...await authHeaders() },
         body: JSON.stringify(input),
@@ -80,7 +81,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
         );
       }
       console.info("[share] POST /api/shares başarılı", { requestId: isRecord(body) ? body.requestId : undefined });
-      setLink(`${window.location.origin}/share/${body.token}`);
+      setLink(`${window.location.origin}${withBasePath(`/share/${body.token}`)}`);
       setToken(body.token);
       setMessage("Salt-okunur paylaşım bağlantısı hazır.");
     } catch (error) {
@@ -96,7 +97,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     if (!token) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/shares/${token}`, { method: "DELETE", headers: await authHeaders() });
+      const response = await fetch(withBasePath(`/api/shares/${token}`), { method: "DELETE", headers: await authHeaders() });
       if (!response.ok) throw new Error("Paylaşım bağlantısı kaldırılamadı.");
       setLink(null);
       setToken(null);

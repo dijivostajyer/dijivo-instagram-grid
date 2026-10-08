@@ -71,6 +71,7 @@ export interface CalendarStoreLike {
   remove(id: string, brandId: string): Promise<void>;
 }
 
+import { withBasePath } from "./base-path";
 export function createApiCalendarStore(
   base = "/api/calendar",
 ): CalendarStoreLike {
@@ -78,19 +79,19 @@ export function createApiCalendarStore(
     async list(brandId, projectId) {
       const query = toQuery({ brandId, projectId });
       const body = await request<{ items: CalendarItem[] }>(
-        `${base}/items?${query}`,
+        `${withBasePath(base)}/items?${query}`,
       );
       return body.items;
     },
     async listAll(brandId) {
       const query = toQuery({ brandId });
       const body = await request<{ items: CalendarItem[] }>(
-        `${base}/brand-items?${query}`,
+        `${withBasePath(base)}/brand-items?${query}`,
       );
       return body.items;
     },
     async create(input: CalendarItemInput) {
-      const body = await request<{ item: CalendarItem }>(`${base}/items`, {
+      const body = await request<{ item: CalendarItem }>(`${withBasePath(base)}/items`, {
         method: "POST",
         body: JSON.stringify(input),
       });
@@ -99,7 +100,7 @@ export function createApiCalendarStore(
     async update(id, patch: CalendarPatch, brandId) {
       const query = toQuery({ brandId });
       const body = await request<{ item: CalendarItem }>(
-        `${base}/items/${encodeURIComponent(id)}?${query}`,
+        `${withBasePath(base)}/items/${encodeURIComponent(id)}?${query}`,
         { method: "PATCH", body: JSON.stringify(patch) },
       );
       return body.item;
@@ -107,7 +108,7 @@ export function createApiCalendarStore(
     async remove(id, brandId) {
       const query = toQuery({ brandId });
       await request(
-        `${base}/items/${encodeURIComponent(id)}?${query}`,
+        `${withBasePath(base)}/items/${encodeURIComponent(id)}?${query}`,
         { method: "DELETE" },
       );
     },

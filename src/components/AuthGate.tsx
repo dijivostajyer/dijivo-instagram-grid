@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 
 import GridManager from "@/components/GridManager";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { withBasePath } from "@/lib/base-path";
 
 export default function AuthGate() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -25,7 +26,7 @@ export default function AuthGate() {
   useEffect(() => {
     if (session !== null) return;
     let cancelled = false;
-    void fetch("/api/auth/bootstrap", { cache: "no-store" })
+    void fetch(withBasePath("/api/auth/bootstrap"), { cache: "no-store" })
       .then(async (response) => response.ok ? response.json() : { canBootstrap: false })
       .then((data: { canBootstrap?: boolean }) => {
         if (!cancelled) setCanBootstrap(data.canBootstrap === true);
@@ -60,7 +61,7 @@ export default function AuthGate() {
       return;
     }
     setBusy(true); setMessage(null);
-    const response = await fetch("/api/auth/bootstrap", {
+    const response = await fetch(withBasePath("/api/auth/bootstrap"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: normalizedEmail, password }),

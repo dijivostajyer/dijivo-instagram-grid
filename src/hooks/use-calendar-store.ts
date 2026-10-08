@@ -13,6 +13,7 @@ import {
   type CalendarPatch,
   type CalendarStoreLike,
 } from "@/lib/calendar-store";
+import { withBasePath } from "@/lib/base-path";
 import type { CalendarItem } from "@/lib/calendar-types";
 
 export type CalendarLoadState = "idle" | "loading" | "ready" | "error";
@@ -74,7 +75,7 @@ export function useCalendarStore(
     let localStore: CalendarStoreLike | null = null;
     void (async () => {
       try {
-        const response = await fetch("/api/calendar/config", {
+        const response = await fetch(withBasePath("/api/calendar/config"), {
           cache: "no-store",
         });
         if (!response.ok) throw new Error("config yok");
