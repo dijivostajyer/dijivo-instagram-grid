@@ -8,6 +8,8 @@ import {
   serializeShareSnapshot,
   shareInputFromGrid,
   SHARE_SNAPSHOT_VERSION,
+  validateShareCreateInput,
+  validateShareSnapshotInput,
   type ShareSnapshotInput,
 } from "./share";
 import { InMemoryShareStore } from "./share-store";
@@ -58,6 +60,20 @@ describe("share token", () => {
 });
 
 describe("share snapshot", () => {
+  it("hydration'dan gelen nullable opsiyonel post alanlarını payload'da undefined'a çevirir", () => {
+    const hydrated = computeGrid([{ ...input().cells[0], source: "mevcut", recencyIndex: 0, pinned: false, alt: null, caption: null, mediaType: null } as unknown as ExistingPost], []);
+    const payload = shareInputFromGrid({ ...BRAND, bio: null, postCount: null } as unknown as Brand, hydrated);
+    expect(payload.cells[0].alt).toBeUndefined();
+    expect(payload.cells[0].caption).toBeUndefined();
+    expect(payload.cells[0].mediaType).toBeUndefined();
+    expect(validateShareSnapshotInput(payload)).not.toBeNull();
+  });
+
+  it("create payload'ında user-scoped workspace-media ref kabul edilir ama snapshot'ta kabul edilmez", () => {
+    const payload = input({ cells: [{ ...input().cells[0], imageUrl: "storage:workspace-media/123e4567-e89b-42d3-a456-426614174000/brand/post.png" }] });
+    expect(validateShareCreateInput(payload)).not.toBeNull();
+    expect(validateShareSnapshotInput(payload)).toBeNull();
+  });
   it("serialize/validation roundtrip brand bilgilerini korur", () => {
     const snapshot = createShareSnapshot(input(), TOKEN, CREATED_AT);
     expect(deserializeShareSnapshot(serializeShareSnapshot(snapshot))).toEqual(snapshot);

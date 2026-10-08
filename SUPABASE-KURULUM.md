@@ -1,0 +1,250 @@
+# Supabase Kurulumu — Takvim / Hatırlatma / Push
+
+Bu dosya, takvim modülünün **production persistence** ve **arka plan
+bildirim** altyapısını ayağa kaldırmak için gereken adımları içerir.
+
+> **Önemli:** Migration bu çalışma ortamından **uygulanamaz** (veritabanı
+> parolası yok, service-role anahtarı DDL yetkisine sahip değil). Bu
+> nedenle uygulama, tablolar yoksa sessizce localStorage'a düşer
+> (`/api/calendar/config` → `{"supabase":false}`). Production'da
+> aşağıdaki adımlar **zorunludur**.
+
+---
+
+## 1. Takvim tabloları (zorunlu)
+
+Supabase Dashboard → **SQL Editor** → aşağıdaki dosyanın **tamamını**
+çalıştırın:
+
+```
+supabase/migrations/202610020003_create_calendar_tables.sql
+```
+
+Oluşturulan nesneler:
+
+| Tablo | Amaç |
+| --- | --- |
+| `calendar_items` | Takvim kayıtları (Post/Reel/Story/Not/Görev) |
+| `reminder_deliveries` | Teslimat kayıtları; `unique (item_id, remind_at)` ile **at-most-once** |
+| `push_subscriptions` | Web push abonelikleri (`endpoint` benzersiz) |
+
+Dosya **idempotenttir** (kaç kez çalıştırılırsa çalıştırılsın aynı
+sonucu verir) ve şunları içerir:
+
+- `dijivo_touch_calendar_row()` / `dijivo_touch_updated_at()` trigger
+  fonksiyonları — `updated_at` + `remind_at` bakımı,
+- `dispatch_due_reminders(integer)` **RPC fonksiyonu** — arka plan işçisinin
+  vadesi gelmiş hatırlatmaları tek idempotent çağrıda teslimata çeviren
+  kaynağı (ham SQL PostgREST'e gönderilmez; `POST
+  /rest/v1/rpc/dispatch_due_reminders` çağrılır),
+- `calendar_items_remind_due_idx` — arka plan işçisinin kritik indeksi,
+- RLS **açık**, policy **tanımsız** → yalnızca `service_role` erişir.
+
+### Doğrulama
+
+```sql
+select table_name
+from information_schema.tables
+where schemaname = 'public'
+  and table_name in ('calendar_items','reminder_deliveries','push_subscriptions')
+order by table_name;
+-- 3 satır dönmeli
+
+select indexname from pg_indexes
+where schemaname = 'public' and tablename = 'calendar_items'
+order by indexname;
+-- calendar_items_remind_due_idx görünmeli
+
+select p.proname, pg_get_function_identity_arguments(p.oid) as args
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.proname = 'dispatch_due_reminders';
+-- dispatch_due_reminders(integer) görünmeli (RPC varlığı)
+```
+
+Uygulama tarafında doğrulama:
+
+```bash
+curl -s http://localhost:3000/api/calendar/config
+# {"supabase":true}   ← migration uygulandıktan SONRA
+```
+
+`{"supabase":false}` dönüyorsa migration henüz uygulanmamıştır ya da
+`SUPABASE_URL` / `SUPABASE_SECRET_KEY` eksiktir.
+
+---
+
+## 2. Arka plan hatırlatma işçisi
+
+Tarayıcıdaki 15 saniyelik polling yalnızca **sekme açıkken** çalışır.
+Gerçek arka plan teslimatı Edge Function ile yapılır.
+
+### 2.1 Vault secret'ları (önce bunu çalıştır)
+
+Cron → Edge Function çağrısında proje URL'si ve özel cron anahtarı
+**düz metin olarak hiçbir SQL dosyasında bulunmaz**; Supabase Vault'ta
+saklanır (Supabase docs: *Scheduling Edge Functions*).
+SQL Editor'da **bir kez**:
+
+```sql
+select vault.create_secret('https://<project-ref>.supabase.co', 'dijivo_project_url');
+select vault.create_secret('<aynı-rastgele-cron-secret>', 'dijivo_cron_secret');
+```
+
+- URL'nin sonunda eğik çizgi olmasın (0004 `rtrim` ile yine korur).
+- Bu secret'lar `202610020004` dosyasının **ön koşulu**dur; yoksa dosya
+  açık hata mesajıyla durar, kırık job kurmaz.
+- Secret değerleri repoya/commit'e **asla** girmez.
+
+### 2.2 Edge Function cron secret'ı ve deploy
+
+Önce güçlü bir rastgele değer üretin ve aynı değeri Edge Function secret'ı
+ve Vault `dijivo_cron_secret` olarak kullanın:
+
+```bash
+openssl rand -hex 32
+supabase secrets set CRON_SECRET=<aynı-rastgele-değer>
+```
+
+```bash
+supabase functions deploy reminder-dispatch --no-verify-jwt
+```
+
+**`--no-verify-jwt` neden gerekli:** cron çağrısı platform JWT'si değil,
+`x-cron-secret` header'ı ile gelir. Function bu değeri kendi
+`CRON_SECRET` değeriyle karşılaştırır; eşleşmezse **401** döner.
+`SUPABASE_SERVICE_ROLE_KEY` yalnızca function'ın PostgREST/RPC erişiminde
+kullanılır. verify_jwt açık deploy ederseniz cron her dakika 401 alır.
+
+### 2.3 VAPID anahtarları
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+**Private** anahtarı Edge Function secret'ı olarak verin:
+
+```bash
+supabase secrets set \
+  VAPID_PUBLIC_KEY=<public> \
+  VAPID_PRIVATE_KEY=<private>
+```
+
+Güvenlik kuralları:
+
+- `VAPID_PRIVATE_KEY` **asla** `NEXT_PUBLIC_` önekiyle tanımlanmaz,
+- `.env.local`/`.env` dosyasına yazılmaz ve commit edilmez,
+- istemci kodu yalnızca `NEXT_PUBLIC_VAPID_PUBLIC_KEY` görür
+  (public anahtar gizli değildir; abonelik açmak için gerekir).
+
+### 2.4 Cron zamanlaması
+
+Vault secret'ları (§2.1) ve Edge Function (§2.2) hazır olduktan sonra
+`supabase/migrations/202610020003_create_calendar_tables.sql`
+çalıştırıldıktan **sonra**, SQL Editor'da önce:
+
+```
+supabase/migrations/202610020004_schedule_reminder_dispatch.sql
+```
+
+Ardından mevcut cron job'unu özel secret modeline geçirmek için:
+
+```
+supabase/migrations/202610070007_secure_reminder_cron.sql
+```
+
+Bu, `reminder-dispatch` işini `pg_cron` ile **her dakika** tetikler;
+çağrı `pg_net` + `net.http_post` ile yapılır, URL/key çalışma anında
+`vault.decrypted_secrets`'ten okunur.
+
+İzgin bir ayrıntı: `202610020004` dosyası **Vault özelliğini bir uzantı
+olarak açmaya çalışmaz** (`create extension vault` içermez). Supabase'nın
+hosted ortamında `vault` bir `CREATE EXTENSION` uzantısı olarak sunulmadığı
+ve `vault.control` dosyasının bulunmadığı için buna çalışmak
+`ERROR: extension "vault" is not available`
+(Could not open vault.control) verir. Gerçek projede `select
+vault.create_secret(...)` zaten çalışıyorsa, Vault yalnızca `vault`
+scheması ve `vault.decrypted_secrets` gibi servis nesneleri üzerinden
+erişilir; migration'in görevi ön koşulda bu erişimi `to_regclass`
+ile doğrulayıp yoksa açık hatayla durmaktır.
+
+Dosya idempotenttir (eski job önce `unschedule` edilir).
+
+### 2.5 Elle doğrulama
+
+```bash
+curl -X POST \
+  -H "x-cron-secret: <aynı-rastgele-değer>" \
+  -H "Content-Type: application/json" \
+  https://<project-ref>.supabase.co/functions/v1/reminder-dispatch
+```
+
+Beklenen: `{"ok":true,"created":0,...}`.
+Aynı komutu ikinci kez çalıştırdığınızda yine `created:0` olmalıdır —
+**idempotency kanıtı** (RPC `on conflict do nothing` + `unique
+(item_id, remind_at)`; yalnızca bu çağrıda YENİ satırlar döner).
+
+Sorun giderme:
+
+| Belirti | Neden / Çözüm |
+| --- | --- |
+| `401 unauthorized` | `dijivo_cron_secret` ≠ Edge `CRON_SECRET` ya da verify_jwt ile deploy edildi → §2.2 |
+| `500 dispatch_rpc_failed` + `PGRST202` | `dispatch_due_reminders()` yok → 0003 migration'ını çalıştırın |
+| Job tetiklenmiyor | `select * from cron.job_run_details order by start_time desc limit 5;` |
+
+### 2.6 Uygulama tarafı
+
+`.env.local` içine:
+
+```
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=<public>
+```
+
+Sonra uygulamada **Bildirimler → "Tarayıcı bildirimlerini etkinleştir"**.
+Bu işlem izni ister, service worker'ı kaydeder ve aboneliği
+`POST /api/push/subscriptions` ile tabloya yazar.
+
+---
+
+## 3. Share storage (mevcut)
+
+1. `supabase/migrations/202609250001_create_share_snapshots.sql` çalıştırılır.
+2. `share-images` bucket'ı **private** olmalı (migration oluşturur).
+3. `share-media` bucket'ı reel videoları için **private**;
+   `SUPABASE_SHARE_MEDIA_BUCKET=share-media`.
+4. `.env.example` → `.env.local`; `SUPABASE_URL` ve `SUPABASE_SECRET_KEY`
+   girin.
+
+Share snapshot'ında `blob:` / `idb:` / `idb-video:` referansı **asla**
+saklanmaz; istemci bu baytları çözer, sunucu private storage'a yükler ve
+snapshot'a yalnızca `storage:` referansı yazar. Böylece bağlantı başka
+cihazda açılabilir.
+
+---
+
+## 4. Ortam değişkenleri özeti
+
+| Değişken | Nerede | Gizli mi? |
+| --- | --- | --- |
+| `SUPABASE_URL` | server | hayır |
+| `SUPABASE_SECRET_KEY` | server | **evet** |
+| `SUPABASE_SHARE_BUCKET` | server | hayır |
+| `SUPABASE_SHARE_MEDIA_BUCKET` | server | hayır |
+| `SHARE_TTL_DAYS` | server | hayır |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | client | hayır (public anahtar) |
+| `VAPID_PRIVATE_KEY` | Edge Function secret | **evet** |
+| `CRON_SECRET` | Edge Function + Vault (`dijivo_cron_secret`) | **evet** |
+
+---
+
+## 5. Cross-device senaryosu
+
+Migration uygulandıktan sonra:
+
+```
+Bilgisayar A → marka → aylık plan → takvim kaydı
+Bilgisayar B → aynı backend → aynı kayıt görünür
+```
+
+localStorage yalnızca Supabase **erişilemediğinde** devreye giren
+fallback/cache'tir; production source of truth Supabase'tir.

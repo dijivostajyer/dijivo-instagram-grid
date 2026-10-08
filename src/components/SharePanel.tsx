@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { ClipboardDocumentIcon, ShareIcon } from "@heroicons/react/16/solid";
 
 import { prepareShareInput } from "@/lib/share-client";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import type { Brand, GridResult } from "@/lib/types";
 
 /**
@@ -24,11 +25,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isTokenResponse(value: unknown): value is { token: string } {
+function isTokenResponse(value: unknown): value is { token: string; requestId?: string } {
   return isRecord(value) && typeof value.token === "string";
 }
 
-function isErrorResponse(value: unknown): value is { error: string } {
+function isErrorResponse(value: unknown): value is { error: string; code?: string; requestId?: string } {
   return isRecord(value) && typeof value.error === "string";
 }
 
@@ -42,6 +43,15 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const authHeaders = useCallback(async (): Promise<HeadersInit> => {
+    const client = getSupabaseBrowserClient();
+    const { data, error } = await client?.auth.getSession() ?? {};
+    if (error || !data?.session?.access_token) {
+      throw new Error("Paylaşım için oturum doğrulanamadı. Lütfen çıkış yapıp tekrar giriş yapın.");
+    }
+    return { Authorization: `Bearer ${data.session.access_token}` };
+  }, []);
+
   const createLink = useCallback(async () => {
     if (result.cells.length === 0) {
       setMessage("Grid boşken paylaşım bağlantısı oluşturulamaz.");
@@ -51,17 +61,25 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     setMessage(null);
     try {
       const input = await prepareShareInput(brand, result);
+      console.info("[share] İstemci payload hazır", {
+        cells: input.cells.length,
+        hasVideo: input.cells.some((cell) => Boolean(cell.videoUrl)),
+        hasWorkspaceMediaRef: JSON.stringify(input).includes("storage:workspace-media/"),
+      });
       const response = await fetch("/api/shares", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...await authHeaders() },
         body: JSON.stringify(input),
       });
       const body: unknown = await response.json();
       if (!response.ok || !isTokenResponse(body)) {
+        console.error("[share] POST /api/shares başarısız", { status: response.status, body });
+        const trace = isErrorResponse(body) && body.requestId ? ` (tanılama: ${body.requestId})` : "";
         throw new Error(
-          isErrorResponse(body) ? body.error : "Paylaşım bağlantısı oluşturulamadı.",
+          `${isErrorResponse(body) ? body.error : "Paylaşım bağlantısı oluşturulamadı."}${trace}`,
         );
       }
+      console.info("[share] POST /api/shares başarılı", { requestId: isRecord(body) ? body.requestId : undefined });
       setLink(`${window.location.origin}/share/${body.token}`);
       setToken(body.token);
       setMessage("Salt-okunur paylaşım bağlantısı hazır.");
@@ -72,13 +90,13 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     } finally {
       setBusy(false);
     }
-  }, [brand, result]);
+  }, [authHeaders, brand, result]);
 
   const revokeLink = useCallback(async () => {
     if (!token) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/shares/${token}`, { method: "DELETE" });
+      const response = await fetch(`/api/shares/${token}`, { method: "DELETE", headers: await authHeaders() });
       if (!response.ok) throw new Error("Paylaşım bağlantısı kaldırılamadı.");
       setLink(null);
       setToken(null);
@@ -90,7 +108,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     } finally {
       setBusy(false);
     }
-  }, [token]);
+  }, [authHeaders, token]);
 
   const copyLink = useCallback(async () => {
     if (!link) return;

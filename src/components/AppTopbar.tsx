@@ -22,6 +22,8 @@ export default function AppTopbar({
   activeProjectId,
   onSelectProject,
   onOpenSidebar,
+  userEmail,
+  onLogout,
 }: {
   view: AppView;
   brands: Brand[];
@@ -32,6 +34,8 @@ export default function AppTopbar({
   activeProjectId: string;
   onSelectProject: (id: string) => void;
   onOpenSidebar: () => void;
+  userEmail: string;
+  onLogout: () => void;
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -105,6 +109,7 @@ export default function AppTopbar({
             <PlusIcon className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">Yeni Marka</span>
           </button>
+          <button type="button" onClick={onLogout} className="hidden text-sm text-neutral-500 underline md:inline" title={userEmail}>Çıkış</button>
         </div>
       </div>
     </header>

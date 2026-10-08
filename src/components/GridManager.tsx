@@ -6,6 +6,7 @@ import { PhotoIcon, XMarkIcon } from "@heroicons/react/16/solid";
 import AppSidebar, { type AppView } from "@/components/AppSidebar";
 import AppTopbar from "@/components/AppTopbar";
 import BrandEditor from "@/components/BrandEditor";
+import CalendarView from "@/components/calendar/CalendarView";
 import BrandHub from "@/components/BrandHub";
 import BrandProfilePage from "@/components/BrandProfilePage";
 import BulkCopyDialog from "@/components/BulkCopyDialog";
@@ -26,6 +27,11 @@ import {
   usePersistedGrid,
   type PostCopyOptions,
 } from "@/hooks/use-persisted-grid";
+import type {
+  CalendarItem,
+} from "@/lib/calendar-types";
+import { useCalendarStore } from "@/hooks/use-calendar-store";
+import { resolveCalendarLink } from "@/lib/calendar-link";
 import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import { monthLabel } from "@/lib/project-ops";
@@ -56,12 +62,13 @@ const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabit
  * metaveri localStorage'da, görseller IndexedDB'de saklanır.
  * Saf durum geçişleri `lib/brand-ops.ts` içinde test edilir.
  */
-export default function GridManager() {
+export default function GridManager({ userEmail, onLogout }: { userEmail: string; onLogout: () => void }) {
   const {
     brand,
     existingPosts,
     plannedPosts,
     ready,
+    syncError,
     brands,
     activeBrandId,
     createBrand,
@@ -98,6 +105,13 @@ export default function GridManager() {
   );
   const [bulkOpen, setBulkOpen] = useState(false);
 
+  // §22/§28: takvim veri katmanı. Supabase yapılandırılmışsa
+  // API katmanı, yoksa yerel depo kullanılır.
+  const calendar = useCalendarStore({
+    brandId: activeBrandId ?? "",
+    projectId: activeProjectId,
+  });
+
   const grid = useMemo(
     () => computeGrid(existingPosts, plannedPosts),
     [existingPosts, plannedPosts],
@@ -114,6 +128,7 @@ export default function GridManager() {
     [existingPosts],
   );
 
+  // Bildirim/hatırlatma tarafı bu proje innerCarol'dan kaldırıldı.
   async function handleExistingUpload(input: {
     url: string;
     alt: string;
@@ -412,6 +427,31 @@ export default function GridManager() {
   function openProject(id: string) {
     selectProject(id);
     setSelectedPostId(null);
+    // §2: "Planı Aç" artık İçerik Takvimi'ni açar.
+    setView("calendar");
+  }
+
+  // §15: takvim kaydının bağlı Grid Planner içeriğini açar.
+  // Post başka bir markadaysa veya silinmişse reddedilir (§23/§37).
+  function handleOpenItemInPlanner(item: CalendarItem) {
+    const resolution = resolveCalendarLink(
+      allProjects,
+      item.postId,
+      activeBrandId ?? "",
+    );
+    if (resolution.status !== "ok") return;
+    selectBrand(item.brandId);
+    selectProject(resolution.link.project.id);
+    setSelectedPostId(item.postId);
+    setView("planner");
+  }
+
+  /** Takvim araç çubuğu "Grid Planner'da Aç": görünen aylık planı açar. */
+  function handleOpenPlanner(projectId: string) {
+    const target = projects.find((item) => item.id === projectId);
+    if (!target) return;
+    selectProject(projectId);
+    setSelectedPostId(null);
     setView("planner");
   }
 
@@ -446,7 +486,7 @@ export default function GridManager() {
         </aside>
 
         <div className="min-w-0 flex-1">
-          <AppTopbar
+      <AppTopbar
             view={view}
             brands={brands}
             activeBrandId={activeBrandId}
@@ -461,10 +501,17 @@ export default function GridManager() {
               selectProject(id);
               setSelectedPostId(null);
             }}
-            onOpenSidebar={() => setSidebarOpen(true)}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        userEmail={userEmail}
+        onLogout={onLogout}
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
+            {syncError ? (
+              <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                {syncError}
+              </div>
+            ) : null}
             {view === "brands" ? (
               <BrandHub
                 brands={brands}
@@ -485,6 +532,7 @@ export default function GridManager() {
                 projects={projects}
                 activeProjectId={activeProjectId}
                 shareLink={shareController.link}
+                brandItems={calendar.brandItems}
                 onOpenProject={openProject}
                 onNavigate={navigate}
               />
@@ -504,6 +552,27 @@ export default function GridManager() {
                   }
                   return error;
                 }}
+              />
+            ) : null}
+
+            {view === "calendar" ? (
+              <CalendarView
+                brandId={activeBrandId ?? ""}
+                brandName={brand.name}
+                activeProjectId={activeProjectId}
+                projects={projects}
+                allProjects={allProjects}
+                brandItems={calendar.brandItems}
+                loadState={calendar.loadState}
+                storeReady={calendar.storeReady}
+                saving={calendar.saving}
+                onRefresh={calendar.refresh}
+                onCreateItem={calendar.createItem}
+                onUpdateItem={calendar.updateItem}
+                onRemoveItem={calendar.removeItem}
+                onOpenItemInPlanner={handleOpenItemInPlanner}
+                onOpenPlanner={handleOpenPlanner}
+                onNavigate={navigate}
               />
             ) : null}
 

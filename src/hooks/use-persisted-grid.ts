@@ -43,6 +43,9 @@ import {
   updateBrandState,
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
+import { getSupabaseBrowserClient } from "../lib/supabase-browser";
+import { pullWorkspace, pushWorkspace, reconcileWorkspaceState } from "../lib/workspace-store";
+import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "../lib/workspace-media-store";
 
 /**
  * §16/§2: tip tanımıları saf geçiş modülünde (brand-ops) yaşar;
@@ -85,6 +88,15 @@ export async function hydrateState(
       refByObjectUrl.set(objectUrl, value);
       trackedObjectUrls.add(objectUrl);
       return objectUrl;
+    }
+    if (isWorkspaceMediaRef(value)) {
+      try {
+        const signedUrl = await resolveWorkspaceMedia(value);
+        refByObjectUrl.set(signedUrl, value);
+        return signedUrl;
+      } catch {
+        return undefined;
+      }
     }
     if (!isImageRef(value)) return value;
     const objectUrl = await loadImageAsObjectUrl(value);
@@ -168,6 +180,8 @@ export interface PersistedGrid {
   plannedPosts: PlannedPost[];
   /** Açılışta kayıtlı veri yüklenene kadar `false`. */
   ready: boolean;
+  /** Uzak workspace yazımı başarısız olursa kullanıcıya gösterilecek hata. */
+  syncError: string | null;
   /** Marka kayıt defteri (tüm markalar). */
   brands: Brand[];
   /** Aktif marka kimliği; boşsa henüz marka yoktur (onboarding). */
@@ -224,11 +238,15 @@ export function usePersistedGrid(): PersistedGrid {
   const [state, setState] = useState<PersistedAppState>(getDefaultAppState);
   const [ready, setReady] = useState(false);
   const [uploadTick, setUploadTick] = useState(0);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const refByObjectUrl = useRef<Map<string, string>>(new Map());
   const trackedObjectUrls = useRef<Set<string>>(new Set());
   const stateRef = useRef<PersistedAppState>(state);
   const skipPersistRef = useRef(false);
+  const workspaceUserRef = useRef<import("@supabase/supabase-js").User | null>(null);
+  const syncChainRef = useRef<Promise<void>>(Promise.resolve());
+  const syncSequenceRef = useRef(0);
 
   stateRef.current = state;
 
@@ -236,7 +254,30 @@ export function usePersistedGrid(): PersistedGrid {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const stored = loadAppState(getBrowserStorage(), getDefaultAppState());
+      const localPersisted = loadAppState(getBrowserStorage(), getDefaultAppState());
+      // Local IDB refs must become Blob URLs before reconciliation so their
+      // media can be streamed to Storage instead of being dropped as `idb:`.
+      const local = await hydrateState(
+        localPersisted,
+        refByObjectUrl.current,
+        trackedObjectUrls.current,
+      );
+      const db = getSupabaseBrowserClient();
+      const user = (await db?.auth.getUser())?.data.user ?? null;
+      workspaceUserRef.current = user;
+      let stored = local;
+      if (user) {
+        try {
+          const remote = await pullWorkspace(user);
+          const reconciled = reconcileWorkspaceState(remote, local);
+          // Do not treat a non-empty workspace as fully migrated. Each entity
+          // type is upserted, so missing posts/highlights heal without
+          // overwriting existing remote records with local duplicates.
+          if ((reconciled.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, reconciled);
+        } catch (error) {
+          console.warn("[workspace] Uzak workspace yüklenemedi; yerel kopya kullanılacak.", error);
+        }
+      }
       const hydrated = await hydrateState(
         stored,
         refByObjectUrl.current,
@@ -275,6 +316,29 @@ export function usePersistedGrid(): PersistedGrid {
       getBrowserStorage(),
       toPersistableState(stateRef.current, refByObjectUrl.current),
     );
+    const user = workspaceUserRef.current;
+    if (user) {
+      // Send the live state, not its localStorage representation. The latter
+      // intentionally contains `idb:` refs, which cannot be uploaded to
+      // Supabase Storage and previously aborted the whole post upsert.
+      // Writes are serialized. Without this, an older full-state request can
+      // finish after a newer one and restore stale rows following an upload.
+      const snapshot = stateRef.current;
+      const sequence = ++syncSequenceRef.current;
+      syncChainRef.current = syncChainRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          await pushWorkspace(user, snapshot);
+          if (sequence === syncSequenceRef.current) setSyncError(null);
+        })
+        .catch((error) => {
+          const detail = error instanceof Error ? error.message : "Bilinmeyen hata";
+          console.error("[workspace] Uzak sync başarısız; yerel kopya korundu.", error);
+          if (sequence === syncSequenceRef.current) {
+            setSyncError(`Değişiklikler buluta kaydedilemedi: ${detail}`);
+          }
+        });
+    }
   }, [state, ready, uploadTick]);
 
   const commit = useCallback((next: PersistedAppState) => {
@@ -476,6 +540,7 @@ export function usePersistedGrid(): PersistedGrid {
     existingPosts: state.existingPosts,
     plannedPosts: state.plannedPosts,
     ready,
+    syncError,
     brands: state.brands ?? [],
     activeBrandId: state.activeBrandId ?? "",
     createBrand,

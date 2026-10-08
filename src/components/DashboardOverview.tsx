@@ -4,6 +4,8 @@ import {
   ArrowRightIcon,
   ArrowDownTrayIcon,
   CalendarDaysIcon,
+  CalendarIcon,
+  ClockIcon,
   PhotoIcon,
   ShareIcon,
   Squares2X2Icon,
@@ -11,6 +13,14 @@ import {
 } from "@heroicons/react/24/outline";
 
 import { computePlanStats } from "@/lib/plan-stats";
+import {
+  formatRelativeDay,
+  formatTime,
+  itemsForDay,
+  summarizeDay,
+  upcomingItems,
+} from "@/lib/calendar-utils";
+import type { CalendarItem } from "@/lib/calendar-types";
 import { monthLabel } from "@/lib/project-ops";
 import type { GridProject } from "@/lib/storage";
 import type { Brand, GridResult } from "@/lib/types";
@@ -43,6 +53,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 const QUICK_ACTIONS: Array<{ view: AppView; label: string; icon: typeof CalendarDaysIcon }> = [
+  { view: "calendar", label: "Takvim", icon: CalendarIcon },
   { view: "planner", label: "Grid Planner", icon: Squares2X2Icon },
   { view: "plans", label: "Yeni Aylık Plan", icon: CalendarDaysIcon },
   { view: "profile", label: "Profili Düzenle", icon: UserCircleIcon },
@@ -64,6 +75,7 @@ export default function DashboardOverview({
   projects,
   activeProjectId,
   shareLink,
+  brandItems,
   onOpenProject,
   onNavigate,
 }: {
@@ -74,6 +86,8 @@ export default function DashboardOverview({
   projects: GridProject[];
   activeProjectId: string;
   shareLink: string | null;
+  /** §23/§24: aktif markanın TÜM takvim kayıtları. */
+  brandItems: CalendarItem[];
   onOpenProject: (id: string) => void;
   onNavigate: (view: AppView) => void;
 }) {
@@ -219,6 +233,12 @@ export default function DashboardOverview({
         </div>
       </div>
 
+      {/* §31/§32: Bugünkü Plan + Yaklaşanlar */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <BugunkunPlanCard brandItems={brandItems} onNavigate={onNavigate} />
+        <YaklasanlarCard brandItems={brandItems} onNavigate={onNavigate} />
+      </div>
+
       {/* Hızlı işlemler */}
       <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Hızlı işlemler</p>
@@ -306,6 +326,143 @@ export default function DashboardOverview({
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Bugünkü Plan kartı (§31): bugün için türetilmiş
+ * durum sayıları ve bir sonraki planlama.
+ * Tüm sayılar takvim kayıtlarından hesaplanır.
+ */
+function BugunkunPlanCard({
+  brandItems,
+  onNavigate,
+}: {
+  brandItems: CalendarItem[];
+  onNavigate: (view: AppView) => void;
+}) {
+  const now = new Date();
+  const summary = summarizeDay(brandItems, now);
+  const next = itemsForDay(brandItems, now).find(
+    (item) =>
+      item.status !== "cancelled" &&
+      new Date(item.scheduledAt).getTime() >= now.getTime(),
+  );
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          Bugünkü Plan
+        </p>
+        <button
+          type="button"
+          onClick={() => onNavigate("calendar")}
+          className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+        >
+          Takvim'de aç <ArrowRightIcon className="size-3.5" aria-hidden="true" />
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        <div className="rounded-lg bg-slate-50 px-2 py-2 text-center">
+          <p className="text-lg font-semibold tabular-nums text-neutral-900">{summary.total}</p>
+          <p className="text-[11px] text-neutral-500">Toplam</p>
+        </div>
+        <div className="rounded-lg bg-sky-50 px-2 py-2 text-center">
+          <p className="text-lg font-semibold tabular-nums text-sky-800">{summary.planned}</p>
+          <p className="text-[11px] text-sky-700">Planlanan</p>
+        </div>
+        <div className="rounded-lg bg-emerald-50 px-2 py-2 text-center">
+          <p className="text-lg font-semibold tabular-nums text-emerald-800">{summary.published}</p>
+          <p className="text-[11px] text-emerald-700">Yayınlanan</p>
+        </div>
+        <div className="rounded-lg bg-amber-50 px-2 py-2 text-center">
+          <p className="text-lg font-semibold tabular-nums text-amber-800">{summary.overdue}</p>
+          <p className="text-[11px] text-amber-700">Gecikmiş</p>
+        </div>
+      </div>
+      {next ? (
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+          <ClockIcon className="size-4 shrink-0 text-sky-700" aria-hidden="true" />
+          <p className="min-w-0 flex-1 truncate text-sm text-neutral-700">
+            Bir sonraki: <span className="font-semibold tabular-nums">{formatTime(next.scheduledAt)}</span> · {next.title}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-neutral-500">
+          {summary.total === 0
+            ? "Bugün için planlama yok."
+            : "Bugünkü planlamaların tamamlandı."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Yaklaşanlar listesi (§32): bugün ve önümüzdeki
+ * 7 gün için zaman sıralı kayıtlar.
+ */
+function YaklasanlarCard({
+  brandItems,
+  onNavigate,
+}: {
+  brandItems: CalendarItem[];
+  onNavigate: (view: AppView) => void;
+}) {
+  const upcoming = upcomingItems(brandItems);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          Yaklaşanlar
+        </p>
+        <button
+          type="button"
+          onClick={() => onNavigate("calendar")}
+          className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+        >
+          Tümünü gör <ArrowRightIcon className="size-3.5" aria-hidden="true" />
+        </button>
+      </div>
+      {upcoming.length === 0 ? (
+        <p className="mt-3 text-sm text-neutral-500">
+          Önümüzdeki 7 gün için planlama yok.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-1.5">
+          {upcoming.map((item) => (
+            <li
+              key={item.id}
+              className="flex items-center gap-2.5 rounded-lg border border-slate-100 px-2.5 py-2"
+            >
+              <span className="w-24 shrink-0 truncate text-xs font-semibold tabular-nums text-sky-700">
+                {formatRelativeDay(item.scheduledAt)}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-neutral-800">
+                {item.title}
+              </span>
+              <span
+                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                  item.status === "published"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : item.status === "draft"
+                      ? "bg-slate-100 text-neutral-600"
+                      : "bg-sky-50 text-sky-700"
+                }`}
+              >
+                {item.status === "published"
+                  ? "Yayınlandı"
+                  : item.status === "draft"
+                    ? "Taslak"
+                    : "Planlandı"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

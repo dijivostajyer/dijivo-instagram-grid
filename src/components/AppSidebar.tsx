@@ -3,6 +3,7 @@
 import {
   ArrowDownTrayIcon,
   CalendarDaysIcon,
+  CalendarIcon,
   Cog6ToothIcon,
   HomeIcon,
   IdentificationIcon,
@@ -16,6 +17,7 @@ export type AppView =
   | "brands"
   | "overview"
   | "plans"
+  | "calendar"
   | "planner"
   | "profile"
   | "share"
@@ -30,6 +32,7 @@ const NAV_ITEMS: Array<{
   { view: "brands", label: "Markalar", icon: IdentificationIcon },
   { view: "overview", label: "Genel Bakış", icon: HomeIcon },
   { view: "plans", label: "Aylık Planlar", icon: CalendarDaysIcon },
+  { view: "calendar", label: "Takvim", icon: CalendarIcon },
   { view: "planner", label: "Grid Planner", icon: Squares2X2Icon },
   { view: "profile", label: "Marka Profili", icon: UserCircleIcon },
   { view: "share", label: "Paylaşım", icon: ShareIcon },
@@ -41,6 +44,7 @@ export const VIEW_TITLES: Record<AppView, string> = {
   brands: "Markalar",
   overview: "Genel Bakış",
   plans: "Aylık Planlar",
+  calendar: "Takvim",
   planner: "Grid Planner",
   profile: "Marka Profili",
   share: "Paylaşım",
@@ -61,15 +65,13 @@ export default function AppSidebar({
 }) {
   return (
     <div className="flex h-full flex-col bg-neutral-900 text-neutral-300">
-      <div className="flex items-center gap-3 border-b border-white/10 px-5 py-4">
-        <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-sm font-semibold text-neutral-900">
-          D
-        </div>
+      <button type="button" onClick={() => onNavigate("brands")} className="flex items-center gap-3 border-b border-white/10 px-5 py-4 text-left hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-400" aria-label="Marka ve proje seçimine dön">
+        <img src="/brand/dijivo-logo.png" alt="Dijivo" className="h-8 w-auto max-w-28 object-contain sm:h-9 sm:max-w-32" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-white">Dijivo Grid</p>
           <p className="truncate text-xs text-neutral-400">Instagram Grid Planner</p>
         </div>
-      </div>
+      </button>
 
       <nav aria-label="Ana gezinme" className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {NAV_ITEMS.map((item) => {
