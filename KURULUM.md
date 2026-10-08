@@ -42,7 +42,7 @@ Dijivo, Instagram profil grid görünümünü planlamanızı ve A4 PDF/JPG olara
 - **Node.js** >= 18.x
 - **npm** >= 9.x
 - **Git** >= 2.x
-- **Supabase** projesi (production persistence için opsiyonel)
+- **Supabase** projesi (production persistence için opsiyonel — takvim kalıcılığı için ihtiyaç duyulabilir; yoksa localStorage fallback ile çalışır)
 
 ---
 
@@ -80,23 +80,26 @@ SUPABASE_SECRET_KEY=
 
 ## Supabase Entegrasyonu
 
-### Zorunlu Olmayan Migration'lar
+### Temizlik Migrationı
 
-Takvim bildirim/hatırlatma sisteminin kaldırılmasıyla birlikte bazı migration'lar artık gereksiz hale gelmiştir. Bunları kaldırmak için:
+Takvim bildirim/hatırlatma sistemi kaldırıldı. Hazır migration listesinde **kullanılmayan infrastructure kalan bir yığın hala bulunur** (reminder dispatch cron jobı, eski VAPID ikon setleri, deprecated yükler). Bunları üretim çevresinde temizlemek için yalnızca **`202610080001_cleanup_calendar_notifications.sql`** kullanılır.
 
-```bash
-# Supabase SQL Editor'da çalıştırın
--- Bu migration, kullanilmayan bildirim/hatırlatma altyapisini temizler
--- supabase/migrations/202610080001_cleanup_calendar_notifications.sql
+```sql
+-- Supabase SQL Editor'da (veya 전담 배포 스크립트 – db parolası olan makinelerden)
+-- Bu migration, kullanılmayan bildirim/hatırlatma altyapisini temizler:
+--   supabase/migrations/202610080001_cleanup_calendar_notifications.sql
 ```
 
-### Calendar Migration (Opsiyonel - Artık Kullanilmiyor)
+### Takvim Migrationı
 
 ```
 supabase/migrations/202610020003_create_calendar_tables.sql
 ```
 
-Bu migration **kullanilmiyor** çünkü bildirim/hatırlatma sistemi kaldırıldı. Eğer daha önce uygulanmışsa, temizlemek için yukarıdaki cleanup migration'ını kullanın.
+Bu migration **kullanılıyor**. Bildirim/hatırlatma sistemi kaldırılmış olsa da, **takvim kalıcılığı (calendar_items)** ve **takvim API** (`/api/calendar/*`) hâlâ bu tablolar tarafından beslenir. Bu dosya kullanılmıyor değil; kaldırılmamıştır — aktif planlama verisini yok etmez.
+
+Takvim verisi iki katmanda saklanabilir:
+- Supabase yapılandırılmış ve migration uygulanmamışsa → `/api/calendar/config` `{supabase:false}` döner ve istemci **localStorage fallback** kullanır.
 
 ---
 
