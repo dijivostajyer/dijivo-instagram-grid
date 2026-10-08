@@ -68,6 +68,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     existingPosts,
     plannedPosts,
     ready,
+    syncError,
     brands,
     activeBrandId,
     createBrand,
@@ -506,6 +507,11 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
+            {syncError ? (
+              <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                {syncError}
+              </div>
+            ) : null}
             {view === "brands" ? (
               <BrandHub
                 brands={brands}

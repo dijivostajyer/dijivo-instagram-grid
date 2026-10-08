@@ -141,13 +141,23 @@ export async function pushWorkspace(user: User, input: PersistedAppState): Promi
   const state = await materializeMedia(input);
   const brands = state.brands ?? [];
   const brandRows = brands.map((brand) => ({ user_id: user.id, id: brand.id, name: brand.name, username: brand.username, display_name: brand.displayName ?? null, profile_image_path: stored(brand.profileImageUrl), bio: brand.bio ?? null, website: brand.website ?? null, phone: brand.phone ?? null, email: brand.email ?? null, category: brand.category ?? null, post_count: brand.postCount ?? null, followers_count: brand.followersCount ?? null, following_count: brand.followingCount ?? null, hashtag_groups: brand.hashtagGroups ?? [], default_mentions: brand.defaultMentions ?? [], default_ctas: brand.defaultCtas ?? [] }));
-  if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw error; }
+  if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw new Error(`workspace_brands yazılamadı: ${error.message}`); }
   const projects = state.projects ?? [];
-  if (projects.length) { const { error } = await db.from("workspace_projects").upsert(projects.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) throw error; }
+  if (projects.length) { const { error } = await db.from("workspace_projects").upsert(projects.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) throw new Error(`workspace_projects yazılamadı: ${error.message}`); }
   const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl) })));
-  if (postRows.length) { const { error } = await db.from("workspace_posts").upsert(postRows, { onConflict: "id" }); if (error) throw error; }
+  if (postRows.length) {
+    const { data, error } = await db.from("workspace_posts").upsert(postRows, { onConflict: "id" }).select("id, project_id");
+    if (error) throw new Error(`workspace_posts yazılamadı: ${error.message}`);
+    if ((data?.length ?? 0) !== postRows.length) {
+      throw new Error(`workspace_posts yazımı doğrulanamadı: ${postRows.length} kayıt istendi, ${data?.length ?? 0} kayıt döndü.`);
+    }
+    console.info("[workspace] workspace_posts upsert tamamlandı", {
+      count: data.length,
+      projectIds: [...new Set(data.map((row) => String(row.project_id)))],
+    });
+  }
   const highlights = brands.flatMap((brand) => (brand.highlights ?? []).map((highlight) => ({ user_id: user.id, id: highlight.id, brand_id: brand.id, title: highlight.title, image_path: stored(highlight.imageUrl) })));
-  if (highlights.length) { const { error } = await db.from("workspace_highlights").upsert(highlights, { onConflict: "id" }); if (error) throw error; }
-  const { error } = await db.from("workspace_prefs").upsert({ user_id: user.id, active_brand_id: state.activeBrandId || null, active_project_id: state.activeProjectId || null }); if (error) throw error;
+  if (highlights.length) { const { error } = await db.from("workspace_highlights").upsert(highlights, { onConflict: "id" }); if (error) throw new Error(`workspace_highlights yazılamadı: ${error.message}`); }
+  const { error } = await db.from("workspace_prefs").upsert({ user_id: user.id, active_brand_id: state.activeBrandId || null, active_project_id: state.activeProjectId || null }); if (error) throw new Error(`workspace_prefs yazılamadı: ${error.message}`);
   return syncActiveProject(state);
 }

@@ -180,6 +180,8 @@ export interface PersistedGrid {
   plannedPosts: PlannedPost[];
   /** Açılışta kayıtlı veri yüklenene kadar `false`. */
   ready: boolean;
+  /** Uzak workspace yazımı başarısız olursa kullanıcıya gösterilecek hata. */
+  syncError: string | null;
   /** Marka kayıt defteri (tüm markalar). */
   brands: Brand[];
   /** Aktif marka kimliği; boşsa henüz marka yoktur (onboarding). */
@@ -236,12 +238,15 @@ export function usePersistedGrid(): PersistedGrid {
   const [state, setState] = useState<PersistedAppState>(getDefaultAppState);
   const [ready, setReady] = useState(false);
   const [uploadTick, setUploadTick] = useState(0);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const refByObjectUrl = useRef<Map<string, string>>(new Map());
   const trackedObjectUrls = useRef<Set<string>>(new Set());
   const stateRef = useRef<PersistedAppState>(state);
   const skipPersistRef = useRef(false);
   const workspaceUserRef = useRef<import("@supabase/supabase-js").User | null>(null);
+  const syncChainRef = useRef<Promise<void>>(Promise.resolve());
+  const syncSequenceRef = useRef(0);
 
   stateRef.current = state;
 
@@ -316,8 +321,23 @@ export function usePersistedGrid(): PersistedGrid {
       // Send the live state, not its localStorage representation. The latter
       // intentionally contains `idb:` refs, which cannot be uploaded to
       // Supabase Storage and previously aborted the whole post upsert.
-      void pushWorkspace(user, stateRef.current)
-        .catch((error) => console.error("[workspace] Uzak sync başarısız; yerel kopya korundu.", error));
+      // Writes are serialized. Without this, an older full-state request can
+      // finish after a newer one and restore stale rows following an upload.
+      const snapshot = stateRef.current;
+      const sequence = ++syncSequenceRef.current;
+      syncChainRef.current = syncChainRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          await pushWorkspace(user, snapshot);
+          if (sequence === syncSequenceRef.current) setSyncError(null);
+        })
+        .catch((error) => {
+          const detail = error instanceof Error ? error.message : "Bilinmeyen hata";
+          console.error("[workspace] Uzak sync başarısız; yerel kopya korundu.", error);
+          if (sequence === syncSequenceRef.current) {
+            setSyncError(`Değişiklikler buluta kaydedilemedi: ${detail}`);
+          }
+        });
     }
   }, [state, ready, uploadTick]);
 
@@ -520,6 +540,7 @@ export function usePersistedGrid(): PersistedGrid {
     existingPosts: state.existingPosts,
     plannedPosts: state.plannedPosts,
     ready,
+    syncError,
     brands: state.brands ?? [],
     activeBrandId: state.activeBrandId ?? "",
     createBrand,
