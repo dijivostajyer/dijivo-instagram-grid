@@ -37,8 +37,20 @@ export default function AuthGate() {
   };
 
   const handleSignUp = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      setMessage("E-posta adresi gerekli.");
+      return;
+    }
+    if (password.length < 6) {
+      setMessage("Şifre en az 6 karakter olmalı.");
+      return;
+    }
     setBusy(true); setMessage(null);
-    const result = await supabase.auth.signUp({ email, password });
+    const result = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+    });
     setBusy(false);
     if (result.error) setMessage(result.error.message);
     else if (!result.data.session) setMessage("Hesap oluşturuldu. E-posta doğrulamasını tamamlayın.");
