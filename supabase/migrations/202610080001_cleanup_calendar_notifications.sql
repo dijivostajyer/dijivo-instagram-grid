@@ -56,12 +56,14 @@ drop index if exists public.calendar_items_remind_due_idx;
 drop trigger if exists calendar_items_touch_row on public.calendar_items;
 
 -- ---------------------------------------------------------------------------
--- 6. pg_cron job'ı (varsa)
+-- 6. pg_cron job'ı (varsa) — PostgreSQL'de drop job if exists desteklenmez,
 -- ---------------------------------------------------------------------------
+-- pg_cron'un own syntax'ı kullanılır: select cron.unschedule(jobid) from cron.job where jobname = ...
+-- Bu idempotent'dir: job yoksa 0 satır döner, hata vermez.
 
--- Bunu el ile kaldırmak gerekebilir, ancak idempotent olarak
--- job yoksa hata vermeyeceği için güvenli.
-drop job if exists "reminder-dispatch";
+select cron.unschedule(jobid)
+from cron.job
+where jobname = 'reminder-dispatch';
 
 -- ---------------------------------------------------------------------------
 -- 7. Extension temizliği (opsiyonel, diğer uygulama uses ediyorsa bırakılabilir)
