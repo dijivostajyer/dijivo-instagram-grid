@@ -102,6 +102,12 @@ export function useCalendarStore(
 
   const load = useCallback(
     async (activeStore: CalendarStoreLike) => {
+      if (!brandId || !projectId) {
+        setItems([]);
+        setBrandItems([]);
+        setLoadState("idle");
+        return;
+      }
       setLoadState("loading");
       try {
         const [projectItems, allBrandItems] =
@@ -122,9 +128,9 @@ export function useCalendarStore(
 
   // Marka/proje değişince yeniden yükle (§23/§24).
   useEffect(() => {
-    if (!store) return;
+    if (!store || !brandId || !projectId) return;
     void load(store);
-  }, [store, load]);
+  }, [store, brandId, projectId, load]);
 
   /** §36: optimistic create — hata durumunda rollback. */
   const createItem = useCallback(
@@ -251,7 +257,7 @@ export function useCalendarStore(
     updateItem,
     removeItem,
     refresh: useCallback(async () => {
-      if (store) await load(store);
-    }, [store, load]),
+      if (store && brandId && projectId) await load(store);
+    }, [store, brandId, projectId, load]),
   };
 }

@@ -313,11 +313,11 @@ export function usePersistedGrid(): PersistedGrid {
     );
     const user = workspaceUserRef.current;
     if (user) {
-      const timer = window.setTimeout(() => {
-        void pushWorkspace(user, toPersistableState(stateRef.current, refByObjectUrl.current))
-          .catch((error) => console.warn("[workspace] Uzak sync başarısız; yerel kopya korundu.", error));
-      }, 500);
-      return () => window.clearTimeout(timer);
+      // Send the live state, not its localStorage representation. The latter
+      // intentionally contains `idb:` refs, which cannot be uploaded to
+      // Supabase Storage and previously aborted the whole post upsert.
+      void pushWorkspace(user, stateRef.current)
+        .catch((error) => console.error("[workspace] Uzak sync başarısız; yerel kopya korundu.", error));
     }
   }, [state, ready, uploadTick]);
 
