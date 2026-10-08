@@ -29,7 +29,7 @@ import {
   type ShareSnapshotInput,
 } from "./share";
 import type { Brand, GridResult } from "./types";
-import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "./workspace-media-store";
+import { isWorkspaceMediaRef, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
 
 export interface ResolvedMedia {
   bytes: Uint8Array;
@@ -215,7 +215,12 @@ export async function prepareShareInput(
     fallbackImage?: string,
   ): Promise<string | undefined> => {
     if (url === undefined) return url;
-    const source = isWorkspaceMediaRef(url) ? await resolveWorkspaceMedia(url) : url;
+    // Cross-device media is already private Storage content. Keep only its
+    // compact reference in the request; the server verifies ownership and
+    // copies it into the public share snapshot pipeline.
+    const workspaceRef = isWorkspaceMediaRef(url) ? url : workspaceMediaRefFromSignedUrl(url);
+    if (workspaceRef) return workspaceRef;
+    const source = url;
     if (!isLocal(source) && !isWorkspaceMediaUrl(source)) return source;
     const media = await reader(source);
     if (media === null) {

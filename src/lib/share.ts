@@ -63,8 +63,13 @@ function isOptionalString(value: unknown): value is string | undefined {
 }
 
 /** Yalnızca başka tarayıcıda da çözülebilen görsel URL'leri kabul edilir. */
-export function isShareableImageUrl(value: string): boolean {
+export function isWorkspaceMediaShareRef(value: string): boolean {
+  return /^storage:workspace-media\/[0-9a-f-]{36}\/.+/i.test(value);
+}
+
+export function isShareableImageUrl(value: string, allowWorkspaceMedia = false): boolean {
   if (value.startsWith("blob:") || value.startsWith("idb:")) return false;
+  if (allowWorkspaceMedia && isWorkspaceMediaShareRef(value)) return true;
   if (/^storage:shares\/[0-9a-f-]+\/[a-z0-9-]+\.(?:jpg|png|webp)$/i.test(value)) return true;
   if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value)) {
     return true;
@@ -83,8 +88,9 @@ export function isShareableImageUrl(value: string): boolean {
  * storage referansı (`storage:media/…`) veya doğrudan http(s)
  * akışı. blob:/idb:/idb-video: referansları reddedilir.
  */
-export function isShareableVideoUrl(value: string): boolean {
+export function isShareableVideoUrl(value: string, allowWorkspaceMedia = false): boolean {
   if (value.startsWith("blob:") || value.startsWith("idb:") || value.startsWith("idb-video:")) return false;
+  if (allowWorkspaceMedia && isWorkspaceMediaShareRef(value)) return true;
   if (/^storage:media\/[0-9a-f-]+\/[a-z0-9-]+\.(?:mp4|webm)$/i.test(value)) return true;
   if (/^data:video\/(?:mp4|webm);base64,[a-z0-9+/=]+$/i.test(value)) {
     return true;
@@ -97,7 +103,7 @@ export function isShareableVideoUrl(value: string): boolean {
   }
 }
 
-function isShareBrand(value: unknown): value is ShareBrand {
+function isShareBrand(value: unknown, allowWorkspaceMedia: boolean): value is ShareBrand {
   return (
     isRecord(value) &&
     typeof value.name === "string" &&
@@ -108,17 +114,17 @@ function isShareBrand(value: unknown): value is ShareBrand {
     (value.followersCount === undefined || typeof value.followersCount === "number") &&
     (value.followingCount === undefined || typeof value.followingCount === "number") &&
     (value.highlights === undefined || (Array.isArray(value.highlights) && value.highlights.every((highlight) => isRecord(highlight) && typeof highlight.id === "string" && typeof highlight.title === "string" && isOptionalString(highlight.imageUrl)))) &&
-    (value.profileImageUrl === undefined || isShareableImageUrl(value.profileImageUrl))
+    (value.profileImageUrl === undefined || isShareableImageUrl(value.profileImageUrl, allowWorkspaceMedia))
   );
 }
 
-function isShareGridCell(value: unknown): value is ShareGridCell {
+function isShareGridCell(value: unknown, allowWorkspaceMedia: boolean): value is ShareGridCell {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
     (value.source === "mevcut" || value.source === "planlanan") &&
     typeof value.imageUrl === "string" &&
-    isShareableImageUrl(value.imageUrl) &&
+    isShareableImageUrl(value.imageUrl, allowWorkspaceMedia) &&
     isOptionalString(value.alt) &&
     typeof value.position === "number" &&
     typeof value.row === "number" &&
@@ -127,22 +133,59 @@ function isShareGridCell(value: unknown): value is ShareGridCell {
     (value.postType === undefined || value.postType === "post" || value.postType === "reel" || value.postType === "carousel") &&
     isOptionalString(value.caption) &&
     (value.mediaType === undefined || value.mediaType === "image" || value.mediaType === "video") &&
-    (value.videoUrl === undefined || (typeof value.videoUrl === "string" && isShareableVideoUrl(value.videoUrl))) &&
-    (value.coverImageUrl === undefined || (typeof value.coverImageUrl === "string" && isShareableImageUrl(value.coverImageUrl)))
+    (value.videoUrl === undefined || (typeof value.videoUrl === "string" && isShareableVideoUrl(value.videoUrl, allowWorkspaceMedia))) &&
+    (value.coverImageUrl === undefined || (typeof value.coverImageUrl === "string" && isShareableImageUrl(value.coverImageUrl, allowWorkspaceMedia)))
   );
 }
 
-export function validateShareSnapshotInput(value: unknown): ShareSnapshotInput | null {
-  if (!isRecord(value) || !isShareBrand(value.brand) || !Array.isArray(value.cells)) {
+function validateShareInput(value: unknown, allowWorkspaceMedia: boolean): ShareSnapshotInput | null {
+  if (!isRecord(value) || !isShareBrand(value.brand, allowWorkspaceMedia) || !Array.isArray(value.cells)) {
     return null;
   }
   const cells: ShareGridCell[] = [];
   for (const cell of value.cells) {
-    if (!isShareGridCell(cell)) return null;
+    if (!isShareGridCell(cell, allowWorkspaceMedia)) return null;
     cells.push({ ...cell, postType: cell.postType ?? "post" });
   }
   if (cells.length === 0 || cells.length > MAX_SHARE_CELLS) return null;
   return { brand: { ...value.brand }, cells };
+}
+
+/** İstemciden gelen taslak, server kopyalamadan önce workspace-media ref içerebilir. */
+export function validateShareCreateInput(value: unknown): ShareSnapshotInput | null {
+  return validateShareInput(value, true);
+}
+
+/** Snapshot'a yalnız taşınabilir share URL'leri/data URL'leri yazılabilir. */
+export function validateShareSnapshotInput(value: unknown): ShareSnapshotInput | null {
+  return validateShareInput(value, false);
+}
+
+/** Gizli veri/medya baytı yazmadan validation'ın ilk başarısız alanını raporlar. */
+export function describeInvalidShareInput(value: unknown): string {
+  if (!isRecord(value)) return "payload object değil";
+  if (!isRecord(value.brand)) return "brand object değil";
+  if (typeof value.brand.name !== "string") return "brand.name string değil";
+  if (typeof value.brand.username !== "string") return "brand.username string değil";
+  for (const field of ["bio", "profileImageUrl"] as const) {
+    if (!isOptionalString(value.brand[field])) return `brand.${field} string|undefined değil`;
+  }
+  for (const field of ["postCount", "followersCount", "followingCount"] as const) {
+    if (value.brand[field] !== undefined && typeof value.brand[field] !== "number") return `brand.${field} number|undefined değil`;
+  }
+  if (!Array.isArray(value.cells)) return "cells array değil";
+  if (value.cells.length === 0 || value.cells.length > MAX_SHARE_CELLS) return "cells sayısı geçersiz";
+  for (let index = 0; index < value.cells.length; index += 1) {
+    const cell = value.cells[index];
+    if (!isRecord(cell)) return `cells[${index}] object değil`;
+    for (const field of ["id", "imageUrl"] as const) if (typeof cell[field] !== "string") return `cells[${index}].${field} string değil`;
+    if (cell.source !== "mevcut" && cell.source !== "planlanan") return `cells[${index}].source geçersiz`;
+    for (const field of ["position", "row", "column"] as const) if (typeof cell[field] !== "number") return `cells[${index}].${field} number değil`;
+    if (typeof cell.pinned !== "boolean") return `cells[${index}].pinned boolean değil`;
+    for (const field of ["alt", "caption", "videoUrl", "coverImageUrl"] as const) if (!isOptionalString(cell[field])) return `cells[${index}].${field} string|undefined değil`;
+    if (cell.mediaType !== undefined && cell.mediaType !== "image" && cell.mediaType !== "video") return `cells[${index}].mediaType geçersiz`;
+  }
+  return "görsel/video URL şeması veya highlight alanı geçersiz";
 }
 
 export function createShareSnapshot(
@@ -199,27 +242,27 @@ export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnaps
     brand: {
       name: brand.name,
       username: brand.username,
-      bio: brand.bio,
+      bio: typeof brand.bio === "string" ? brand.bio : undefined,
       profileImageUrl: brand.profileImageUrl,
-      postCount: brand.postCount,
-      followersCount: brand.followersCount,
-      followingCount: brand.followingCount,
-      highlights: brand.highlights,
+      postCount: typeof brand.postCount === "number" ? brand.postCount : undefined,
+      followersCount: typeof brand.followersCount === "number" ? brand.followersCount : undefined,
+      followingCount: typeof brand.followingCount === "number" ? brand.followingCount : undefined,
+      highlights: brand.highlights?.map((highlight) => ({ ...highlight, imageUrl: typeof highlight.imageUrl === "string" ? highlight.imageUrl : undefined })),
     },
     cells: result.cells.map((cell) => ({
       id: cell.post.id,
       source: cell.post.source,
       imageUrl: cell.post.imageUrl,
-      alt: cell.post.alt,
+      alt: typeof cell.post.alt === "string" ? cell.post.alt : undefined,
       position: cell.position,
       row: cell.row,
       column: cell.column,
       pinned: cell.pinned,
       postType: cell.post.postType ?? "post",
-      caption: cell.post.caption,
-      mediaType: cell.post.mediaType,
-      videoUrl: cell.post.videoUrl,
-      coverImageUrl: cell.post.coverImageUrl,
+      caption: typeof cell.post.caption === "string" ? cell.post.caption : undefined,
+      mediaType: cell.post.mediaType === "image" || cell.post.mediaType === "video" ? cell.post.mediaType : undefined,
+      videoUrl: typeof cell.post.videoUrl === "string" ? cell.post.videoUrl : undefined,
+      coverImageUrl: typeof cell.post.coverImageUrl === "string" ? cell.post.coverImageUrl : undefined,
     })),
   };
 }
