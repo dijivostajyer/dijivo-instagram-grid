@@ -90,7 +90,7 @@ SUPABASE_WORKSPACE_MEDIA_BUCKET=workspace-media
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` adı Supabase'in public/anon API anahtarının teknik adıdır; **anonymous sign-in değildir**. Bu uygulama yalnız email + password ile `signUp` ve `signInWithPassword` çağrıları yapar.
 
 1. Supabase Dashboard → Authentication → Providers bölümünde **Email** sağlayıcısını etkinleştirin.
-2. `supabase/migrations/202610080002_create_workspace_persistence.sql` migration'ını SQL Editor’da çalıştırın. Migration workspace tablolarını, `user_id` ilişkisini, RLS politikalarını ve private `workspace-media` bucket’ını oluşturur.
+2. Yeni kurulumda `supabase/migrations/202610080002_create_workspace_persistence.sql` migration'ını SQL Editor’da çalıştırın. Daha önce bu migration uygulanmışsa ayrıca `202610080003_reconcile_workspace_brand_fields.sql` migration'ını çalıştırın. Bunlar workspace tablolarını, `user_id` ilişkisini, RLS politikalarını, brand hashtag alanlarını ve private `workspace-media` bucket’ını oluşturur/günceller.
 3. Uygulamayı açın ve giriş ekranındaki **İlk hesabı oluştur** ile e-posta/şifre hesabını oluşturun. E-posta onayı etkinse gelen bağlantıyı tamamlayın.
 4. Girişten sonra mevcut localStorage/IndexedDB grid verisi yalnızca kullanıcının uzak workspace’i boşsa aynı kullanıcıya aktarılır. Yerel kopya silinmez; aktarımdan sonra sync başarısız olsa da fallback olarak kalır.
 

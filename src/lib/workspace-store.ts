@@ -36,6 +36,81 @@ async function materializeMedia(state: PersistedAppState): Promise<PersistedAppS
   return { ...state, brands, projects, brand: activeBrand, existingPosts: activeProject?.existingPosts ?? state.existingPosts, plannedPosts: activeProject?.plannedPosts ?? state.plannedPosts };
 }
 
+function mergeBrand(remote: Brand, local: Brand): Brand {
+  const preferRemote = <T,>(remoteValue: T | undefined, localValue: T | undefined): T | undefined =>
+    remoteValue ?? localValue;
+  const remoteHighlights = remote.highlights ?? [];
+  const highlightIds = new Set(remoteHighlights.map((highlight) => highlight.id));
+  return {
+    ...local,
+    ...remote,
+    displayName: preferRemote(remote.displayName, local.displayName),
+    profileImageUrl: preferRemote(remote.profileImageUrl, local.profileImageUrl),
+    bio: preferRemote(remote.bio, local.bio), website: preferRemote(remote.website, local.website),
+    phone: preferRemote(remote.phone, local.phone), email: preferRemote(remote.email, local.email),
+    category: preferRemote(remote.category, local.category),
+    postCount: preferRemote(remote.postCount, local.postCount),
+    followersCount: preferRemote(remote.followersCount, local.followersCount),
+    followingCount: preferRemote(remote.followingCount, local.followingCount),
+    hashtagGroups: remote.hashtagGroups?.length ? remote.hashtagGroups : (local.hashtagGroups ?? []),
+    defaultMentions: remote.defaultMentions?.length ? remote.defaultMentions : (local.defaultMentions ?? []),
+    defaultCtas: remote.defaultCtas?.length ? remote.defaultCtas : (local.defaultCtas ?? []),
+    highlights: [...remoteHighlights, ...(local.highlights ?? []).filter((highlight) => !highlightIds.has(highlight.id))],
+  };
+}
+
+function mergePosts<T extends ExistingPost | PlannedPost>(remote: T[], local: T[]): T[] {
+  const ids = new Set(remote.map((post) => post.id));
+  return [...remote, ...local.filter((post) => !ids.has(post.id))];
+}
+
+/**
+ * Entity-level, non-destructive initial reconciliation. Remote records win
+ * when the same ID exists; local records missing remotely are retained so a
+ * partially migrated workspace (brands/projects present, posts absent) heals
+ * itself on the next sync.
+ */
+export function reconcileWorkspaceState(
+  remote: PersistedAppState | null,
+  local: PersistedAppState,
+): PersistedAppState {
+  if (!remote) return local;
+  const localBrands = new Map((local.brands ?? []).map((brand) => [brand.id, brand]));
+  const brands = (remote.brands ?? []).map((brand) => {
+    const localBrand = localBrands.get(brand.id);
+    if (localBrand) localBrands.delete(brand.id);
+    return localBrand ? mergeBrand(brand, localBrand) : brand;
+  });
+  brands.push(...localBrands.values());
+
+  const localProjects = new Map((local.projects ?? []).map((project) => [project.id, project]));
+  const projects = (remote.projects ?? []).map((project) => {
+    const localProject = localProjects.get(project.id);
+    if (localProject) localProjects.delete(project.id);
+    if (!localProject) return project;
+    const brand = brands.find((item) => item.id === project.brandId) ?? project.brand;
+    return {
+      ...project,
+      brand,
+      existingPosts: mergePosts(project.existingPosts, localProject.existingPosts),
+      plannedPosts: mergePosts(project.plannedPosts, localProject.plannedPosts),
+    };
+  });
+  projects.push(...localProjects.values());
+
+  const activeBrandId = remote.activeBrandId && brands.some((brand) => brand.id === remote.activeBrandId)
+    ? remote.activeBrandId : local.activeBrandId;
+  const activeProjectId = remote.activeProjectId && projects.some((project) => project.id === remote.activeProjectId)
+    ? remote.activeProjectId : local.activeProjectId;
+  const activeBrand = brands.find((brand) => brand.id === activeBrandId) ?? brands[0] ?? local.brand;
+  const activeProject = projects.find((project) => project.id === activeProjectId);
+  return {
+    version: 3, brands, projects, activeBrandId, activeProjectId, brand: activeBrand,
+    existingPosts: activeProject?.existingPosts ?? local.existingPosts,
+    plannedPosts: activeProject?.plannedPosts ?? local.plannedPosts,
+  };
+}
+
 export async function pullWorkspace(user: User): Promise<PersistedAppState | null> {
   const db = getSupabaseBrowserClient(); if (!db) return null;
   const [brandsResult, projectsResult, postsResult, highlightsResult, prefsResult] = await Promise.all([

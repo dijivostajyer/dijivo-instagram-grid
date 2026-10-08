@@ -44,7 +44,7 @@ import {
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
-import { pullWorkspace, pushWorkspace } from "../lib/workspace-store";
+import { pullWorkspace, pushWorkspace, reconcileWorkspaceState } from "../lib/workspace-store";
 import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "../lib/workspace-media-store";
 
 /**
@@ -249,7 +249,14 @@ export function usePersistedGrid(): PersistedGrid {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const local = loadAppState(getBrowserStorage(), getDefaultAppState());
+      const localPersisted = loadAppState(getBrowserStorage(), getDefaultAppState());
+      // Local IDB refs must become Blob URLs before reconciliation so their
+      // media can be streamed to Storage instead of being dropped as `idb:`.
+      const local = await hydrateState(
+        localPersisted,
+        refByObjectUrl.current,
+        trackedObjectUrls.current,
+      );
       const db = getSupabaseBrowserClient();
       const user = (await db?.auth.getUser())?.data.user ?? null;
       workspaceUserRef.current = user;
@@ -257,8 +264,11 @@ export function usePersistedGrid(): PersistedGrid {
       if (user) {
         try {
           const remote = await pullWorkspace(user);
-          if (remote) stored = remote;
-          else if ((local.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, local);
+          const reconciled = reconcileWorkspaceState(remote, local);
+          // Do not treat a non-empty workspace as fully migrated. Each entity
+          // type is upserted, so missing posts/highlights heal without
+          // overwriting existing remote records with local duplicates.
+          if ((reconciled.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, reconciled);
         } catch (error) {
           console.warn("[workspace] Uzak workspace yüklenemedi; yerel kopya kullanılacak.", error);
         }
