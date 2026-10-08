@@ -3,87 +3,43 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
-  useRef,
   useState,
 } from "react";
 
 import { createApiCalendarStore } from "@/lib/api-calendar-store";
-import { deliveryKey, selectDueReminders } from "@/lib/calendar-backend";
-import type { CalendarItemType } from "@/lib/calendar-types";
-
-/** Tür → görünen ad; Edge Function SQL'i ile aynı metinleri üretir. */
-export function reminderBodyLabel(itemType: CalendarItemType): string {
-  switch (itemType) {
-    case "task":
-      return "Görev";
-    case "note":
-      return "Not";
-    case "story":
-      return "Story";
-    case "reel":
-      return "Reel";
-    default:
-      return "Post";
-  }
-}
 import {
   LocalCalendarStore,
   type CalendarItemInput,
   type CalendarPatch,
   type CalendarStoreLike,
 } from "@/lib/calendar-store";
-import type { CalendarItem, ReminderDelivery } from "@/lib/calendar-types";
-import {
-  isNotificationSupported,
-  notificationPermission,
-  requestNotificationPermission,
-  showBrowserNotification,
-  subscribePush,
-} from "@/lib/browser-push";
-
-/**
- * İstemci yedeği poll aralığı (§27). **Bu birincil teslimat yolu
- * değildir** — arka plan teslimatı backend işçisindedir
- * (`supabase/functions/reminder-dispatch`, pg_cron ile her dakika).
- * Poll yalnızca uygulama açıkken geç kalan kayıtları yakalar.
- */
-const REMINDER_POLL_MS = 15_000;
+import type { CalendarItem } from "@/lib/calendar-types";
 
 export type CalendarLoadState = "idle" | "loading" | "ready" | "error";
-
 export interface UseCalendarStoreResult {
   /** Depo çözümlenene kadar `false` (config probe). */
   storeReady: boolean;
   usingSupabase: boolean;
   /** Aktif aylık planın kayıtları (§24 izolasyonu). */
   items: CalendarItem[];
-  /** Aktif markanın TÜM kayıtları (dashboard + hatırlatma motoru). */
+  /** Aktif markanın TÜM kayıtları (dashboard). */
   brandItems: CalendarItem[];
-  deliveries: ReminderDelivery[];
-  unreadCount: number;
   loadState: CalendarLoadState;
   /** Optimistic kayıt sırasında `true` (§36 Kaydediliyor). */
   saving: boolean;
   saveError: string | null;
-  browserPermission: NotificationPermission | "unsupported";
-  enableBrowserNotifications: () => Promise<void>;
   createItem: (input: CalendarItemInput) => Promise<CalendarItem | null>;
   updateItem: (
     id: string,
     patch: CalendarPatch,
   ) => Promise<CalendarItem | null>;
   removeItem: (id: string) => Promise<boolean>;
-  markRead: (deliveryId: string) => Promise<void>;
-  markAllRead: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
 interface UseCalendarStoreOptions {
   brandId: string;
   projectId: string;
-  /** Hatırlatma tesliminde toast gibi UI aksiyonu (§26/§27). */
-  onReminder?: (delivery: ReminderDelivery) => void;
 }
 
 interface CalendarConfigResponse {
@@ -98,35 +54,18 @@ interface CalendarConfigResponse {
  *   Secret key istemci bundle'ına asla girmez.
  * - Kayıt işlemleri optimistic: UI anında güncellenir, hata
  *   durumunda rollback + "Kaydedilemedi" (§36).
- * - Hatırlatma motoru: 15 saniyede bir due olan hatırlatmaları
- *   teslim eder; `(itemId, remindAt)` eşsizliği sayesinde
- *   aynı hatırlatma bir kez gelir (§27).
  */
 export function useCalendarStore(
   options: UseCalendarStoreOptions,
 ): UseCalendarStoreResult {
-  const { brandId, projectId, onReminder } = options;
+  const { brandId, projectId } = options;
   const [store, setStore] = useState<CalendarStoreLike | null>(null);
   const [usingSupabase, setUsingSupabase] = useState(false);
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [brandItems, setBrandItems] = useState<CalendarItem[]>([]);
-  const [deliveries, setDeliveries] = useState<ReminderDelivery[]>([]);
   const [loadState, setLoadState] = useState<CalendarLoadState>("idle");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [browserPermission, setBrowserPermission] =
-    useState<NotificationPermission | "unsupported">(
-      notificationPermission(),
-    );
-
-  const onReminderRef = useRef(onReminder);
-  onReminderRef.current = onReminder;
-  const brandItemsRef = useRef<CalendarItem[]>([]);
-  brandItemsRef.current = brandItems;
-  const deliveriesRef = useRef<ReminderDelivery[]>([]);
-  deliveriesRef.current = deliveries;
-  /** Oturum içi teslim deduplikasyonu (store katmanı da korur). */
-  const deliveredKeysRef = useRef<Set<string>>(new Set());
 
   // §22/§28: depo seçimi — Supabase varsa API katmanı,
   // yoksa yerel depo. Secret asla istemciye gitmez.
@@ -165,21 +104,13 @@ export function useCalendarStore(
     async (activeStore: CalendarStoreLike) => {
       setLoadState("loading");
       try {
-        const [projectItems, allBrandItems, allDeliveries] =
+        const [projectItems, allBrandItems] =
           await Promise.all([
             activeStore.list(brandId, projectId),
             activeStore.listAll(brandId),
-            activeStore.listDeliveries(brandId),
           ]);
         setItems(projectItems);
         setBrandItems(allBrandItems);
-        setDeliveries(allDeliveries);
-        // Teslim edilmişleri oturum haritasına al (tekrar teslim yok).
-        deliveredKeysRef.current = new Set(
-          allDeliveries.map(
-            (delivery) => `${delivery.itemId}|${delivery.remindAt}`,
-          ),
-        );
         setLoadState("ready");
       } catch (error) {
         console.error("[calendar] Kayıtlar yüklenemedi:", error);
@@ -194,95 +125,6 @@ export function useCalendarStore(
     if (!store) return;
     void load(store);
   }, [store, load]);
-
-  /**
-   * §27: hatırlatma motoru. Due olan hatırlatmaları
-   * once-only olarak teslim eder; in-app bildirim +
-   * (izin verildiyse) tarayıcı bildirimi çıkarır.
-   */
-  /**
-   * İstemci yedeği: uygulama/sekme açıkken vadesi gelen hatırlatmaları
-   * gösterir. **Birincil teslimat sahibi backend işçisidir**
-   * (`supabase/functions/reminder-dispatch`); burada kullanılan
-   * `selectDueReminders` saf mantığı aynı `itemId|remindAt` anahtarını
-   * kullandığı için backend'in teslim ettiği bir hatırlatma burada
-   * tekrar gönderilmez.
-   */
-  useEffect(() => {
-    if (!store) return;
-    let cancelled = false;
-    const deliverDue = async () => {
-      if (cancelled) return;
-      const activeDeliveries = deliveriesRef.current;
-      const delivered = new Set(
-        activeDeliveries.map((delivery) =>
-          deliveryKey(delivery.itemId, delivery.remindAt),
-        ),
-      );
-      for (const key of deliveredKeysRef.current) delivered.add(key);
-      const due = selectDueReminders(
-        brandItemsRef.current,
-        delivered,
-        Date.now(),
-        brandId,
-      );
-      for (const candidate of due) {
-        deliveredKeysRef.current.add(
-          deliveryKey(candidate.itemId, candidate.remindAt),
-        );
-        const source = brandItemsRef.current.find(
-          (item) => item.id === candidate.itemId,
-        );
-        try {
-          const delivery = await store.deliverReminder({
-            itemId: candidate.itemId,
-            brandId,
-            channel: "in_app",
-            remindAt: candidate.remindAt,
-            scheduledAt: source?.scheduledAt ?? candidate.remindAt,
-            title: candidate.title,
-            body: `${reminderBodyLabel(candidate.itemType)} hatırlatması`,
-          });
-          setDeliveries((previous) => [delivery, ...previous]);
-          // §29: uygulama açıkken tarayıcı bildirimi (izin varsa).
-          showBrowserNotification(
-            `Hatırlatma: ${candidate.title}`,
-            delivery.body,
-          );
-          onReminderRef.current?.(delivery);
-        } catch (error) {
-          // 409/duplicate: zaten teslim edilmiş — sessizce atla.
-          const message =
-            error instanceof Error ? error.message : String(error);
-          if (!/zaten/i.test(message)) {
-            console.error("[calendar] Hatırlatma teslim edilemedi:", error);
-          }
-        }
-      }
-    };
-    void deliverDue();
-    const timer = setInterval(() => void deliverDue(), REMINDER_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [store, brandId]);
-
-  // Arka plan teslimatı icin abonelik brand'a bağlanır: Edge Function
-  // `push_subscriptions.brand_id` üzerinden hedef cihazları seçer.
-  const enableBrowserNotifications = useCallback(async () => {
-    const permission = await requestNotificationPermission(brandId);
-    setBrowserPermission(permission);
-  }, [brandId]);
-
-  // İzin, uygulama dışındayken (ör. tarayıcı site ayarlarından) verilmiş
-  // olabilir. Eski akış bu durumda UI'ı "etkin" gösterip subscribe çağrısını
-  // hiç yapmıyordu; sonuç olarak push_subscriptions boş kalıyordu. Aktif
-  // marka hazır olduğunda aboneliği idempotent biçimde backend'e eşitleriz.
-  useEffect(() => {
-    if (browserPermission !== "granted" || brandId.length === 0) return;
-    void subscribePush(brandId);
-  }, [brandId, browserPermission]);
 
   /** §36: optimistic create — hata durumunda rollback. */
   const createItem = useCallback(
@@ -393,45 +235,8 @@ export function useCalendarStore(
         setSaving(false);
       }
     },
-    [store, brandId, items, brandItems],
-  );
-
-  const markRead = useCallback(
-    async (deliveryId: string) => {
-      if (!store) return;
-      // Optimistic: okundu işareti anında görünür.
-      setDeliveries((previous) =>
-        previous.map((delivery) =>
-          delivery.id === deliveryId
-            ? { ...delivery, readAt: new Date().toISOString() }
-            : delivery,
-        ),
-      );
-      try {
-        await store.markRead(deliveryId, brandId);
-      } catch (error) {
-        console.error("[calendar] Bildirim okundu işaretlenemedi:", error);
-      }
-    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, brandId],
-  );
-
-  const markAllRead = useCallback(async () => {
-    if (!store) return;
-    const timestamp = new Date().toISOString();
-    setDeliveries((previous) =>
-      previous.map((delivery) => ({ ...delivery, readAt: timestamp })),
-    );
-    try {
-      await store.markAllRead(brandId);
-    } catch (error) {
-      console.error("[calendar] Bildirimler okundu işaretlenemedi:", error);
-    }
-  }, [store, brandId]);
-
-  const unreadCount = useMemo(
-    () => deliveries.filter((delivery) => !delivery.readAt).length,
-    [deliveries],
   );
 
   return {
@@ -439,23 +244,14 @@ export function useCalendarStore(
     usingSupabase,
     items,
     brandItems,
-    deliveries,
-    unreadCount,
     loadState,
     saving,
     saveError,
-    browserPermission,
-    enableBrowserNotifications,
     createItem,
     updateItem,
     removeItem,
-    markRead,
-    markAllRead,
     refresh: useCallback(async () => {
       if (store) await load(store);
     }, [store, load]),
   };
 }
-
-/** Tarayıcı bildirim desteği (§29) — bileşenler için. */
-export { isNotificationSupported };

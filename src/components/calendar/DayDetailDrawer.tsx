@@ -17,7 +17,6 @@ import {
   formatWeekdayLong,
   formatDayLong,
   isToday,
-  reminderBody,
 } from "@/lib/calendar-utils";
 import {
   ITEM_TYPE_META,
@@ -25,6 +24,9 @@ import {
 } from "@/lib/calendar-types";
 import type { LinkResolution } from "@/lib/calendar-link";
 import StatusBadge from "./StatusBadge";
+
+// Not: bu dosya bildirim/hatırlatma UI’sünden arındırıldı.
+// Hatırlatma kısmı kaldırıldı; sadece planlama/çizim tarafı kaldı.
 
 /**
  * Gün detayı drawer/modal (§10/§18/§20/§37).
@@ -68,7 +70,6 @@ export default function DayDetailDrawer({
   const today = isToday(date);
   const doneCount = (item: CalendarItem) =>
     item.checklist.filter((entry) => entry.done).length;
-
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="day-drawer-title">
       <div
@@ -243,11 +244,6 @@ function DayItem({
           ) : null}
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <StatusBadge status={item.status === "planned" && new Date(item.scheduledAt).getTime() < Date.now() ? "overdue" : item.status} />
-            {item.reminderOffsetMinutes != null ? (
-              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-500">
-                🔔 {reminderBody(item)}
-              </span>
-            ) : null}
             {item.checklist.length > 0 ? (
               <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-500">
                 {done}/{item.checklist.length} checklist

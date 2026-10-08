@@ -36,55 +36,13 @@ export interface CalendarItem {
   /** Planlanan tarih+saat (ISO 8601). */
   scheduledAt: string;
   status: CalendarStatus;
-  /** Hatırlatma ön süresi (dakika); null = hatırlatma yok (§12). */
-  reminderOffsetMinutes: number | null;
-  /** Sunucunun hesapladığı teslim anı; `null` = hatırlatma yok. */
-  remindAt?: string | null;
+  /** Checklist (§20). */
   checklist: ChecklistItem[];
+  /** Oluşturulma anı (ISO 8601). */
   createdAt: string;
+  /** Son güncelleme anı (ISO 8601). */
   updatedAt: string;
 }
-
-/**
- * Hatırlatma teslim kaydı (§27 once-only delivery).
- * `(itemId, remindAt)` eşsizdir: aynı hatırlatma
- * bir kez teslim edilir, tekrar etmez.
- */
-export interface ReminderDelivery {
-  id: string;
-  itemId: string;
-  brandId: string;
-  channel: NotificationChannel;
-  remindAt: string;
-  scheduledAt: string;
-  title: string;
-  body: string;
-  createdAt: string;
-  deliveredAt: string;
-  readAt: string | null;
-}
-
-/**
- * Bildirim kanalı (§30: provider-independent tasarım).
- * Bu fazda in_app çalışır; browser_push ve email
- * altyapısı hazırlıktadır.
- */
-export type NotificationChannel = "in_app" | "browser_push" | "email";
-
-/** Hatırlatma seçenekleri (§12). `custom` için dakika değeri eklenir. */
-export interface ReminderOption {
-  value: number | null;
-  label: string;
-}
-
-export const REMINDER_OPTIONS: ReminderOption[] = [
-  { value: null, label: "Hatırlatma yok" },
-  { value: 15, label: "15 dakika önce" },
-  { value: 60, label: "1 saat önce" },
-  { value: 1440, label: "1 gün önce" },
-  { value: 2880, label: "2 gün önce" },
-  { value: -1, label: "Özel" },
-];
 
 /** Durum meta bilgisi: renk + metin (§8: renk tek başına yetmez). */
 export const STATUS_META: Record<
@@ -141,23 +99,8 @@ export interface CalendarItemRow {
   description: string;
   scheduled_at: string;
   status: CalendarStatus;
-  reminder_offset_minutes: number | null;
-  remind_at?: string | null;
   checklist: ChecklistItem[];
   created_at: string;
   updated_at: string;
 }
 
-export interface ReminderDeliveryRow {
-  id: string;
-  item_id: string;
-  brand_id: string;
-  channel: NotificationChannel;
-  remind_at: string;
-  scheduled_at: string;
-  title: string;
-  body: string;
-  created_at: string;
-  delivered_at: string;
-  read_at: string | null;
-}

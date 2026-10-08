@@ -1,12 +1,9 @@
-import {
-  type CalendarItem,
-  type CalendarItemRow,
-  type CalendarItemType,
-  type CalendarStatus,
-  type ChecklistItem,
-  type NotificationChannel,
-  type ReminderDelivery,
-  type ReminderDeliveryRow,
+import type {
+  CalendarItem,
+  CalendarItemRow,
+  CalendarItemType,
+  CalendarStatus,
+  ChecklistItem,
 } from "./calendar-types";
 import { randomId } from "./calendar-utils";
 
@@ -20,7 +17,6 @@ import { randomId } from "./calendar-utils";
  */
 
 export const CALENDAR_STORAGE_KEY = "dijivo-calendar-items";
-export const DELIVERIES_STORAGE_KEY = "dijivo-calendar-deliveries";
 
 export interface CalendarStoreLike {
   list(brandId: string, projectId: string): Promise<CalendarItem[]>;
@@ -32,14 +28,6 @@ export interface CalendarStoreLike {
     brandId: string,
   ): Promise<CalendarItem>;
   remove(id: string, brandId: string): Promise<void>;
-  listDeliveries(brandId: string): Promise<ReminderDelivery[]>;
-  /**
-   * Hatırlatmayı teslim eder (once-only). Aynı
-   * (itemId, remindAt) için ikinci çağrı reddedilir.
-   */
-  deliverReminder(delivery: ReminderDeliveryInput): Promise<ReminderDelivery>;
-  markRead(deliveryId: string, brandId: string): Promise<void>;
-  markAllRead(brandId: string): Promise<void>;
 }
 
 export interface CalendarItemInput {
@@ -51,7 +39,6 @@ export interface CalendarItemInput {
   description: string;
   scheduledAt: string;
   status: CalendarStatus;
-  reminderOffsetMinutes: number | null;
   checklist: ChecklistItem[];
 }
 
@@ -62,18 +49,7 @@ export interface CalendarPatch {
   description?: string;
   scheduledAt?: string;
   status?: CalendarStatus;
-  reminderOffsetMinutes?: number | null;
   checklist?: ChecklistItem[];
-}
-
-export interface ReminderDeliveryInput {
-  itemId: string;
-  brandId: string;
-  channel: NotificationChannel;
-  remindAt: string;
-  scheduledAt: string;
-  title: string;
-  body: string;
 }
 
 /** Marka dışı kayıt erişimi (§23/§37: çarpma değil, açık hata). */
@@ -95,7 +71,6 @@ function rowToItem(row: CalendarItemRow): CalendarItem {
     description: row.description,
     scheduledAt: row.scheduled_at,
     status: row.status,
-    reminderOffsetMinutes: row.reminder_offset_minutes,
     checklist: row.checklist ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -113,42 +88,9 @@ function itemToRow(item: CalendarItem): CalendarItemRow {
     description: item.description,
     scheduled_at: item.scheduledAt,
     status: item.status,
-    reminder_offset_minutes: item.reminderOffsetMinutes,
     checklist: item.checklist,
     created_at: item.createdAt,
     updated_at: item.updatedAt,
-  };
-}
-
-function rowToDelivery(row: ReminderDeliveryRow): ReminderDelivery {
-  return {
-    id: row.id,
-    itemId: row.item_id,
-    brandId: row.brand_id,
-    channel: row.channel,
-    remindAt: row.remind_at,
-    scheduledAt: row.scheduled_at,
-    title: row.title,
-    body: row.body,
-    createdAt: row.created_at,
-    deliveredAt: row.delivered_at,
-    readAt: row.read_at,
-  };
-}
-
-function deliveryToRow(delivery: ReminderDelivery): ReminderDeliveryRow {
-  return {
-    id: delivery.id,
-    item_id: delivery.itemId,
-    brand_id: delivery.brandId,
-    channel: delivery.channel,
-    remind_at: delivery.remindAt,
-    scheduled_at: delivery.scheduledAt,
-    title: delivery.title,
-    body: delivery.body,
-    created_at: delivery.createdAt,
-    delivered_at: delivery.deliveredAt,
-    read_at: delivery.readAt,
   };
 }
 
@@ -172,10 +114,9 @@ function writeRows<T>(key: string, rows: T[]): void {
  * Supabase API katmanı tercih edilir; bu sınıf
  * yedek ve test ortamıdır.
  */
-export class LocalCalendarStore implements CalendarStoreLike {
+export class LocalCalendarStore {
   constructor(
     private readonly itemsKey = CALENDAR_STORAGE_KEY,
-    private readonly deliveriesKey = DELIVERIES_STORAGE_KEY,
     private readonly now = () => new Date(),
   ) {}
 
@@ -185,14 +126,6 @@ export class LocalCalendarStore implements CalendarStoreLike {
 
   private writeItems(rows: CalendarItemRow[]): void {
     writeRows(this.itemsKey, rows);
-  }
-
-  private readDeliveries(): ReminderDeliveryRow[] {
-    return readRows<ReminderDeliveryRow>(this.deliveriesKey);
-  }
-
-  private writeDeliveries(rows: ReminderDeliveryRow[]): void {
-    writeRows(this.deliveriesKey, rows);
   }
 
   async list(brandId: string, projectId: string): Promise<CalendarItem[]> {
@@ -243,10 +176,6 @@ export class LocalCalendarStore implements CalendarStoreLike {
         description: patch.description ?? rows[index].description,
         scheduled_at: patch.scheduledAt ?? rows[index].scheduled_at,
         status: patch.status ?? rows[index].status,
-        reminder_offset_minutes:
-          patch.reminderOffsetMinutes !== undefined
-            ? patch.reminderOffsetMinutes
-            : rows[index].reminder_offset_minutes,
         checklist: patch.checklist ?? rows[index].checklist,
         updated_at: this.now().toISOString(),
       },
@@ -265,62 +194,5 @@ export class LocalCalendarStore implements CalendarStoreLike {
       throw new CalendarAccessError("Takvim kaydı bulunamadı.");
     }
     this.writeItems(next);
-    // Bağlı hatırlatma teslimleri kaskad silinir.
-    this.writeDeliveries(
-      this.readDeliveries().filter((row) => row.item_id !== id),
-    );
-  }
-
-  async listDeliveries(brandId: string): Promise<ReminderDelivery[]> {
-    return this.readDeliveries()
-      .filter((row) => row.brand_id === brandId)
-      .sort((left, right) => right.delivered_at.localeCompare(left.delivered_at))
-      .map(rowToDelivery);
-  }
-
-  async deliverReminder(
-    delivery: ReminderDeliveryInput,
-  ): Promise<ReminderDelivery> {
-    const rows = this.readDeliveries();
-    // Once-only (§27): aynı kayıt + aynı hatırlatma anı
-    // ikinci kez teslim edilmez.
-    const exists = rows.some(
-      (row) =>
-        row.item_id === delivery.itemId && row.remind_at === delivery.remindAt,
-    );
-    if (exists) {
-      throw new CalendarAccessError("Hatırlatma zaten teslim edildi.");
-    }
-    const timestamp = this.now().toISOString();
-    const record: ReminderDelivery = {
-      ...delivery,
-      id: randomId(),
-      createdAt: timestamp,
-      deliveredAt: timestamp,
-      readAt: null,
-    };
-    this.writeDeliveries([deliveryToRow(record), ...rows]);
-    return record;
-  }
-
-  async markRead(deliveryId: string, brandId: string): Promise<void> {
-    const rows = this.readDeliveries();
-    const index = rows.findIndex(
-      (row) => row.id === deliveryId && row.brand_id === brandId,
-    );
-    if (index === -1) {
-      throw new CalendarAccessError("Bildirim kaydı bulunamadı.");
-    }
-    rows[index] = { ...rows[index], read_at: this.now().toISOString() };
-    this.writeDeliveries(rows);
-  }
-
-  async markAllRead(brandId: string): Promise<void> {
-    const timestamp = this.now().toISOString();
-    this.writeDeliveries(
-      this.readDeliveries().map((row) =>
-        row.brand_id === brandId ? { ...row, read_at: timestamp } : row,
-      ),
-    );
   }
 }

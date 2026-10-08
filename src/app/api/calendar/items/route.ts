@@ -54,10 +54,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       description: String(input.description ?? ""),
       scheduledAt: String(input.scheduledAt ?? ""),
       status: String(input.status ?? "") as never,
-      reminderOffsetMinutes:
-        input.reminderOffsetMinutes === undefined || input.reminderOffsetMinutes === null
-          ? null
-          : Number(input.reminderOffsetMinutes),
       checklist: Array.isArray(input.checklist) ? (input.checklist as never) : [],
     });
     if (error) {
@@ -72,10 +68,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       description: String(input.description ?? ""),
       scheduledAt: String(input.scheduledAt),
       status: input.status as never,
-      reminderOffsetMinutes:
-        input.reminderOffsetMinutes === undefined || input.reminderOffsetMinutes === null
-          ? null
-          : Number(input.reminderOffsetMinutes),
       checklist: Array.isArray(input.checklist) ? (input.checklist as never) : [],
     });
     return NextResponse.json({ item }, { status: 201 });

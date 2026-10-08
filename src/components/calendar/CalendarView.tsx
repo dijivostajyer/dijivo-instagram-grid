@@ -267,7 +267,6 @@ export default function CalendarView({
         description: input.description,
         scheduledAt: input.scheduledAt,
         status: input.status,
-        reminderOffsetMinutes: input.reminderOffsetMinutes,
         checklist: input.checklist,
       };
       return (await onUpdateItem(editingId, patch)) !== null;

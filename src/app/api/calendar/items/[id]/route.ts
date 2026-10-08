@@ -37,10 +37,6 @@ export async function PATCH(
       title: patch.title === undefined ? undefined : String(patch.title),
       scheduledAt: patch.scheduledAt === undefined ? undefined : String(patch.scheduledAt),
       status: patch.status === undefined ? undefined : (patch.status as never),
-      reminderOffsetMinutes:
-        patch.reminderOffsetMinutes === undefined || patch.reminderOffsetMinutes === null
-          ? undefined
-          : Number(patch.reminderOffsetMinutes),
       itemType: patch.itemType === undefined ? undefined : (patch.itemType as never),
     });
     if (error) return clientError(error, 400);

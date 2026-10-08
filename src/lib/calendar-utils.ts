@@ -1,9 +1,9 @@
-import {
-  type CalendarItem,
-  type CalendarItemType,
-  type CalendarStatus,
-  type ChecklistItem,
-  type DisplayStatus,
+import type {
+  CalendarItem,
+  CalendarItemType,
+  CalendarStatus,
+  ChecklistItem,
+  DisplayStatus,
 } from "./calendar-types";
 
 /**
@@ -143,21 +143,6 @@ export function filterByProject(
   );
 }
 
-/** Hatırlatma zamanı: planlama zamanı - ön süre (§12). */
-export function reminderAt(
-  scheduledAt: string,
-  offsetMinutes: number,
-): Date {
-  return new Date(new Date(scheduledAt).getTime() - offsetMinutes * 60_000);
-}
-
-/** Hatırlatma metni: "20:00 Reel yayınlanacak". */
-export function reminderBody(item: CalendarItem): string {
-  const time = formatTime(item.scheduledAt);
-  const type = item.itemType === "task" ? "görev" : item.itemType;
-  return `${time} ${type} planlandı`;
-}
-
 /** Saat biçimi: "20:00". */
 export function formatTime(iso: string): string {
   const date = new Date(iso);
@@ -267,7 +252,6 @@ export function validateCalendarInput(input: {
   scheduledAt: string;
   status: CalendarStatus;
   itemType: CalendarItemType;
-  reminderOffsetMinutes: number | null;
   brandId: string;
   projectId: string;
   postId: string | null;
@@ -284,14 +268,6 @@ export function validateCalendarInput(input: {
   if (!validStatuses.includes(input.status)) return "Geçersiz durum.";
   const validTypes: CalendarItemType[] = ["post", "reel", "story", "note", "task"];
   if (!validTypes.includes(input.itemType)) return "Geçersiz içerik türü.";
-  // Hatırlatma ön süresi negatif olamaz: hatırlatma,
-  // planlama zamanından sonra olamaz (§38).
-  if (
-    input.reminderOffsetMinutes !== null &&
-    (input.reminderOffsetMinutes < 0 || !Number.isFinite(input.reminderOffsetMinutes))
-  ) {
-    return "Geçersiz hatırlatma süresi.";
-  }
   return null;
 }
 
@@ -303,7 +279,6 @@ export function validateCalendarPatch(patch: {
   title?: string;
   scheduledAt?: string;
   status?: CalendarStatus;
-  reminderOffsetMinutes?: number | null;
   itemType?: CalendarItemType;
 }): string | null {
   if (patch.title !== undefined && !patch.title.trim()) {
@@ -321,13 +296,6 @@ export function validateCalendarPatch(patch: {
   if (patch.itemType !== undefined) {
     const validTypes: CalendarItemType[] = ["post", "reel", "story", "note", "task"];
     if (!validTypes.includes(patch.itemType)) return "Geçersiz içerik türü.";
-  }
-  if (
-    patch.reminderOffsetMinutes != null &&
-    (patch.reminderOffsetMinutes < 0 ||
-      !Number.isFinite(patch.reminderOffsetMinutes))
-  ) {
-    return "Geçersiz hatırlatma süresi.";
   }
   return null;
 }
@@ -366,7 +334,6 @@ export function buildCalendarItem(
     description: string;
     scheduledAt: string;
     status: CalendarStatus;
-    reminderOffsetMinutes: number | null;
     checklist: ChecklistItem[];
   },
   now = new Date(),
@@ -407,19 +374,6 @@ export function computeDraggedScheduledAt(
     result.setHours(target.hour, source.getMinutes(), 0, 0);
   }
   return result.toISOString();
-}
-
-/** Hatırlatma ön süresi etiketi (§12). */
-export function formatReminderOffset(offsetMinutes: number): string {
-  if (offsetMinutes < 60) {
-    return `${offsetMinutes} dakika önce`;
-  }
-  if (offsetMinutes < 1440) {
-    const hours = Math.round(offsetMinutes / 60);
-    return `${hours} saat önce`;
-  }
-  const days = Math.round(offsetMinutes / 1440);
-  return `${days} gün önce`;
 }
 
 /** Date → "yyyy-mm-dd" (date input değeri). */

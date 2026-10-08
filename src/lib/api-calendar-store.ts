@@ -1,12 +1,7 @@
-import {
-  type CalendarItem,
-  type ReminderDelivery,
-} from "./calendar-types";
+import type { CalendarItem } from "./calendar-types";
 import type {
   CalendarItemInput,
   CalendarPatch,
-  CalendarStoreLike,
-  ReminderDeliveryInput,
 } from "./calendar-store";
 
 /**
@@ -64,6 +59,18 @@ function toQuery(params: Record<string, string>): string {
   return new URLSearchParams(params).toString();
 }
 
+export interface CalendarStoreLike {
+  list(brandId: string, projectId: string): Promise<CalendarItem[]>;
+  listAll(brandId: string): Promise<CalendarItem[]>;
+  create(input: CalendarItemInput): Promise<CalendarItem>;
+  update(
+    id: string,
+    patch: CalendarPatch,
+    brandId: string,
+  ): Promise<CalendarItem>;
+  remove(id: string, brandId: string): Promise<void>;
+}
+
 export function createApiCalendarStore(
   base = "/api/calendar",
 ): CalendarStoreLike {
@@ -103,33 +110,6 @@ export function createApiCalendarStore(
         `${base}/items/${encodeURIComponent(id)}?${query}`,
         { method: "DELETE" },
       );
-    },
-    async listDeliveries(brandId) {
-      const query = toQuery({ brandId });
-      const body = await request<{ deliveries: ReminderDelivery[] }>(
-        `${base}/deliveries?${query}`,
-      );
-      return body.deliveries;
-    },
-    async deliverReminder(delivery: ReminderDeliveryInput) {
-      const body = await request<{ delivery: ReminderDelivery }>(
-        `${base}/deliveries`,
-        { method: "POST", body: JSON.stringify(delivery) },
-      );
-      return body.delivery;
-    },
-    async markRead(deliveryId, brandId) {
-      const query = toQuery({ brandId });
-      await request(
-        `${base}/deliveries/${encodeURIComponent(deliveryId)}?${query}`,
-        { method: "PATCH", body: JSON.stringify({}) },
-      );
-    },
-    async markAllRead(brandId) {
-      const query = toQuery({ brandId });
-      await request(`${base}/deliveries/mark-all-read?${query}`, {
-        method: "POST",
-      });
     },
   };
 }

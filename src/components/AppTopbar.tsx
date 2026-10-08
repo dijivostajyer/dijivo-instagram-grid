@@ -2,8 +2,6 @@
 
 import { Bars3Icon, CheckIcon, PlusIcon } from "@heroicons/react/16/solid";
 
-import NotificationCenter from "@/components/calendar/NotificationCenter";
-import type { ReminderDelivery } from "@/lib/calendar-types";
 import type { GridProject } from "@/lib/storage";
 import type { Brand } from "@/lib/types";
 import { VIEW_TITLES, type AppView } from "./AppSidebar";
@@ -24,12 +22,6 @@ export default function AppTopbar({
   activeProjectId,
   onSelectProject,
   onOpenSidebar,
-  deliveries,
-  unreadCount,
-  browserPermission,
-  onMarkRead,
-  onMarkAllRead,
-  onEnableBrowserNotifications,
 }: {
   view: AppView;
   brands: Brand[];
@@ -40,13 +32,6 @@ export default function AppTopbar({
   activeProjectId: string;
   onSelectProject: (id: string) => void;
   onOpenSidebar: () => void;
-  /** §26/§27: bildirim merkezi verileri. */
-  deliveries: ReminderDelivery[];
-  unreadCount: number;
-  browserPermission: NotificationPermission | "unsupported";
-  onMarkRead: (deliveryId: string) => void;
-  onMarkAllRead: () => void;
-  onEnableBrowserNotifications: () => void;
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -111,16 +96,6 @@ export default function AppTopbar({
               </option>
             ))}
           </select>
-
-          {/* §26: bildirim merkezi zili */}
-          <NotificationCenter
-            deliveries={deliveries}
-            unreadCount={unreadCount}
-            browserPermission={browserPermission}
-            onMarkRead={onMarkRead}
-            onMarkAllRead={onMarkAllRead}
-            onEnableBrowserNotifications={onEnableBrowserNotifications}
-          />
 
           <button
             type="button"

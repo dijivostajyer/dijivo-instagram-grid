@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BellIcon } from "@heroicons/react/20/solid";
 import { PhotoIcon, XMarkIcon } from "@heroicons/react/16/solid";
 
 import AppSidebar, { type AppView } from "@/components/AppSidebar";
 import AppTopbar from "@/components/AppTopbar";
 import BrandEditor from "@/components/BrandEditor";
 import CalendarView from "@/components/calendar/CalendarView";
-import NotificationCenter from "@/components/calendar/NotificationCenter";
 import BrandHub from "@/components/BrandHub";
 import BrandProfilePage from "@/components/BrandProfilePage";
 import BulkCopyDialog from "@/components/BulkCopyDialog";
@@ -29,13 +27,11 @@ import {
   usePersistedGrid,
   type PostCopyOptions,
 } from "@/hooks/use-persisted-grid";
-import { useCalendarStore } from "@/hooks/use-calendar-store";
 import type {
   CalendarItem,
-  ReminderDelivery,
 } from "@/lib/calendar-types";
+import { useCalendarStore } from "@/hooks/use-calendar-store";
 import { resolveCalendarLink } from "@/lib/calendar-link";
-import { formatRelativeDay } from "@/lib/calendar-utils";
 import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import { monthLabel } from "@/lib/project-ops";
@@ -107,24 +103,13 @@ export default function GridManager() {
     new Set(),
   );
   const [bulkOpen, setBulkOpen] = useState(false);
-  // §26: hatırlatma tesliminde gösterilen toast.
-  const [toast, setToast] = useState<ReminderDelivery | null>(null);
 
   // §22/§28: takvim veri katmanı. Supabase yapılandırılmışsa
-  // API katmanı, yoksa yerel depo kullanılır. Hatırlatma
-  // motoru (§27) burada çalışır; teslimde toast gösterilir.
+  // API katmanı, yoksa yerel depo kullanılır.
   const calendar = useCalendarStore({
     brandId: activeBrandId ?? "",
     projectId: activeProjectId,
-    onReminder: (delivery) => setToast(delivery),
   });
-
-  // Toast otomatik kapanışı (§26).
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 6000);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   const grid = useMemo(
     () => computeGrid(existingPosts, plannedPosts),
@@ -142,6 +127,7 @@ export default function GridManager() {
     [existingPosts],
   );
 
+  // Bildirim/hatırlatma tarafı bu proje innerCarol'dan kaldırıldı.
   async function handleExistingUpload(input: {
     url: string;
     alt: string;
@@ -515,12 +501,6 @@ export default function GridManager() {
               setSelectedPostId(null);
             }}
             onOpenSidebar={() => setSidebarOpen(true)}
-            deliveries={calendar.deliveries}
-            unreadCount={calendar.unreadCount}
-            browserPermission={calendar.browserPermission}
-            onMarkRead={calendar.markRead}
-            onMarkAllRead={calendar.markAllRead}
-            onEnableBrowserNotifications={calendar.enableBrowserNotifications}
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
@@ -947,38 +927,6 @@ export default function GridManager() {
                 onCopyHighlight={copyHighlightToBrand}
               />
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* §26: hatırlatma toast'ı (in-app bildirim). */}
-      {toast ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="animate-toast-in fixed bottom-4 right-4 z-[60] max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
-        >
-          <div className="flex items-start gap-3">
-            <BellIcon className="mt-0.5 size-5 shrink-0 text-sky-700" aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-neutral-900">
-                {toast.title}
-              </p>
-              <p className="mt-0.5 truncate text-sm text-neutral-600">
-                {toast.body}
-              </p>
-              <p className="mt-1 text-xs font-medium text-sky-700">
-                {formatRelativeDay(toast.scheduledAt)}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setToast(null)}
-              aria-label="Bildirimi kapat"
-              className="grid size-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-600"
-            >
-              <XMarkIcon className="size-4" aria-hidden="true" />
-            </button>
           </div>
         </div>
       ) : null}

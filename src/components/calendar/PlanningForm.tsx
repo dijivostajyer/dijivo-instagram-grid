@@ -13,7 +13,6 @@ import {
 } from "@/lib/calendar-utils";
 import {
   ITEM_TYPE_META,
-  REMINDER_OPTIONS,
   STATUS_META,
   type CalendarItem,
   type CalendarItemType,
@@ -32,7 +31,6 @@ const LINKABLE_TYPES: CalendarItemType[] = ["post", "reel", "story"];
  * - Tür seçimi: Post / Reel / Story / Not / Görev.
  * - Post/Reel/Story: "Yeni içerik" veya
  *   "Mevcut Grid Planner içeriğini bağla" (§14).
- * - Hatırlatma: yok / 15dk / 1sa / 1gün / 2gün / özel.
  * - Checklist (§20), doğrulama hataları (§38),
  *   Kaydediliyor / Kaydedilemedi durumları (§36).
  */
@@ -86,30 +84,6 @@ export default function PlanningForm({
   const [status, setStatus] = useState<CalendarStatus>(
     editing?.status ?? "planned",
   );
-  const [reminderValue, setReminderValue] = useState<string>(
-    editing?.reminderOffsetMinutes == null
-      ? ""
-      : [15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes)
-        ? String(editing.reminderOffsetMinutes)
-        : "custom",
-  );
-  // Düzenleme modunda özel hatırlatıcıyı tekrar kaydetmek, önceden boş
-  // alanların 0'a dönüşüp hatırlatıcıyı kaybettirmemelidir.
-  const [customDays, setCustomDays] = useState(
-    editing && ![15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes ?? 0)
-      ? String(Math.floor((editing.reminderOffsetMinutes ?? 0) / 1440))
-      : "",
-  );
-  const [customHours, setCustomHours] = useState(
-    editing && ![15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes ?? 0)
-      ? String(Math.floor(((editing.reminderOffsetMinutes ?? 0) % 1440) / 60))
-      : "",
-  );
-  const [customMinutes, setCustomMinutes] = useState(
-    editing && ![15, 60, 1440, 2880].includes(editing.reminderOffsetMinutes ?? 0)
-      ? String((editing.reminderOffsetMinutes ?? 0) % 60)
-      : "",
-  );
   const [checklist, setChecklist] = useState<ChecklistItem[]>(
     editing?.checklist ?? [],
   );
@@ -151,18 +125,6 @@ export default function PlanningForm({
     setChecklistDraft("");
   }
 
-  const reminderOffsetMinutes = useMemo((): number | null => {
-    if (reminderValue === "") return null;
-    if (reminderValue === "custom" || reminderValue === "-1") {
-      const days = Number(customDays) || 0;
-      const hours = Number(customHours) || 0;
-      const minutes = Number(customMinutes) || 0;
-      const total = days * 1440 + hours * 60 + minutes;
-      return total > 0 ? total : 0;
-    }
-    return Number(reminderValue);
-  }, [reminderValue, customDays, customHours, customMinutes]);
-
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
@@ -176,7 +138,6 @@ export default function PlanningForm({
       description,
       scheduledAt,
       status,
-      reminderOffsetMinutes,
       checklist,
     };
     // §38: istemci tarafı doğrulama (sunucu da doğrulur).
@@ -422,83 +383,6 @@ export default function PlanningForm({
                   </option>
                 ))}
             </select>
-          </div>
-
-          {/* Hatırlatma (§12) */}
-          <div>
-            <label htmlFor="planning-reminder" className={labelClass}>
-              Hatırlatma
-            </label>
-            <select
-              id="planning-reminder"
-              value={reminderValue}
-              onChange={(event) =>
-                setReminderValue(event.target.value === "-1" ? "custom" : event.target.value)
-              }
-              className={inputClass}
-            >
-              {REMINDER_OPTIONS.map((option) => (
-                <option
-                  key={option.label}
-                  value={option.value === null ? "" : String(option.value)}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {reminderValue === "custom" ? (
-              <div
-                className="mt-2 grid grid-cols-3 gap-2"
-                role="group"
-                aria-label="Özel hatırlatma süresi"
-              >
-                <div>
-                  <label htmlFor="reminder-days" className="mb-0.5 block text-[11px] text-neutral-500">
-                    Gün
-                  </label>
-                  <input
-                    id="reminder-days"
-                    type="number"
-                    min={0}
-                    max={365}
-                    value={customDays}
-                    onChange={(event) => setCustomDays(event.target.value)}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reminder-hours" className="mb-0.5 block text-[11px] text-neutral-500">
-                    Saat
-                  </label>
-                  <input
-                    id="reminder-hours"
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={customHours}
-                    onChange={(event) => setCustomHours(event.target.value)}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reminder-minutes" className="mb-0.5 block text-[11px] text-neutral-500">
-                    Dakika
-                  </label>
-                  <input
-                    id="reminder-minutes"
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={customMinutes}
-                    onChange={(event) => setCustomMinutes(event.target.value)}
-                    className={inputClass}
-                  />
-                  <p className="mt-0.5 text-[10px] text-neutral-400">
-                    planlama zamanından önce
-                  </p>
-                </div>
-              </div>
-            ) : null}
           </div>
 
           {/* Checklist (§20) */}
