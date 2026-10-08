@@ -76,6 +76,25 @@ SUPABASE_SECRET_KEY=
 
 **Not:** Supabase yapılandırılmamışsa, tüm takvim verileri localStorage fallback ile çalışır. Production için Supabase yapılandırması önerilir.
 
+### Workspace giriş ve cross-device kalıcılığı
+
+Grid workspace’i Supabase Auth ile korunur. `.env.local` ve deployment ortamına şunları ekleyin:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase Publishable/anon key>
+SUPABASE_WORKSPACE_MEDIA_BUCKET=workspace-media
+```
+
+`SUPABASE_SECRET_KEY` veya `service_role` anahtarını `NEXT_PUBLIC_` ile başlayan bir değişkene koymayın. Workspace CRUD ve Storage erişimi, tarayıcıdaki Auth oturumu ile RLS üzerinden yapılır.
+
+1. Supabase Dashboard → Authentication → Providers bölümünde **Email** sağlayıcısını etkinleştirin.
+2. `supabase/migrations/202610080002_create_workspace_persistence.sql` migration'ını SQL Editor’da çalıştırın. Migration workspace tablolarını, `user_id` ilişkisini, RLS politikalarını ve private `workspace-media` bucket’ını oluşturur.
+3. Uygulamayı açın ve giriş ekranındaki **İlk hesabı oluştur** ile e-posta/şifre hesabını oluşturun. E-posta onayı etkinse gelen bağlantıyı tamamlayın.
+4. Girişten sonra mevcut localStorage/IndexedDB grid verisi yalnızca kullanıcının uzak workspace’i boşsa aynı kullanıcıya aktarılır. Yerel kopya silinmez; aktarımdan sonra sync başarısız olsa da fallback olarak kalır.
+
+Medya nesneleri `<auth.uid()>/<brandId>/<...>` mantığında private bucket’a yazılır. Image/video için kısa ömürlü signed URL kullanılır; 100 MB Reel yüklemeleri JSON/base64 yerine doğrudan signed binary upload ile aktarılır.
+
 ---
 
 ## Supabase Entegrasyonu

@@ -1,5 +1,5 @@
-import GridManager from "@/components/GridManager";
+import AuthGate from "@/components/AuthGate";
 
 export default function Home() {
-  return <GridManager />;
+  return <AuthGate />;
 }

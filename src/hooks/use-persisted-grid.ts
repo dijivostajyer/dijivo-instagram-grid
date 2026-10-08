@@ -43,6 +43,9 @@ import {
   updateBrandState,
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
+import { getSupabaseBrowserClient } from "../lib/supabase-browser";
+import { pullWorkspace, pushWorkspace } from "../lib/workspace-store";
+import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "../lib/workspace-media-store";
 
 /**
  * §16/§2: tip tanımıları saf geçiş modülünde (brand-ops) yaşar;
@@ -85,6 +88,15 @@ export async function hydrateState(
       refByObjectUrl.set(objectUrl, value);
       trackedObjectUrls.add(objectUrl);
       return objectUrl;
+    }
+    if (isWorkspaceMediaRef(value)) {
+      try {
+        const signedUrl = await resolveWorkspaceMedia(value);
+        refByObjectUrl.set(signedUrl, value);
+        return signedUrl;
+      } catch {
+        return undefined;
+      }
     }
     if (!isImageRef(value)) return value;
     const objectUrl = await loadImageAsObjectUrl(value);
@@ -229,6 +241,7 @@ export function usePersistedGrid(): PersistedGrid {
   const trackedObjectUrls = useRef<Set<string>>(new Set());
   const stateRef = useRef<PersistedAppState>(state);
   const skipPersistRef = useRef(false);
+  const workspaceUserRef = useRef<import("@supabase/supabase-js").User | null>(null);
 
   stateRef.current = state;
 
@@ -236,7 +249,20 @@ export function usePersistedGrid(): PersistedGrid {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const stored = loadAppState(getBrowserStorage(), getDefaultAppState());
+      const local = loadAppState(getBrowserStorage(), getDefaultAppState());
+      const db = getSupabaseBrowserClient();
+      const user = (await db?.auth.getUser())?.data.user ?? null;
+      workspaceUserRef.current = user;
+      let stored = local;
+      if (user) {
+        try {
+          const remote = await pullWorkspace(user);
+          if (remote) stored = remote;
+          else if ((local.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, local);
+        } catch (error) {
+          console.warn("[workspace] Uzak workspace yüklenemedi; yerel kopya kullanılacak.", error);
+        }
+      }
       const hydrated = await hydrateState(
         stored,
         refByObjectUrl.current,
@@ -275,6 +301,14 @@ export function usePersistedGrid(): PersistedGrid {
       getBrowserStorage(),
       toPersistableState(stateRef.current, refByObjectUrl.current),
     );
+    const user = workspaceUserRef.current;
+    if (user) {
+      const timer = window.setTimeout(() => {
+        void pushWorkspace(user, toPersistableState(stateRef.current, refByObjectUrl.current))
+          .catch((error) => console.warn("[workspace] Uzak sync başarısız; yerel kopya korundu.", error));
+      }, 500);
+      return () => window.clearTimeout(timer);
+    }
   }, [state, ready, uploadTick]);
 
   const commit = useCallback((next: PersistedAppState) => {

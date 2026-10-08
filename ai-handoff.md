@@ -42,6 +42,10 @@ Bu araç bir sosyal medya yayınlama veya takvim ürünü değildir. RADAAR takv
 
 Teknik seçim değiştirilecekse, gerekçe `## 13. Karar Kaydı` bölümüne eklenmeden mimari değiştirilmez.
 
+### Cross-device workspace güvenlik kararı (2026-10-08)
+
+Workspace kalıcılığı Supabase Auth ile tek kullanıcı/tek hesap modeli kullanır. Tüm `workspace_*` satırları `user_id = auth.uid()` RLS politikasıyla scope edilir; rol veya anonymous access yoktur. `workspace-media` private bucket’tır ve nesne path’inin ilk segmenti kullanıcının UUID’sidir. Tarayıcı yalnız anon/publishable anahtarı ve kendi Auth oturumunu kullanır; service-role anahtarı browser bundle’ına girmez. İlk login’de uzak workspace boşsa eski local veri güvenli biçimde aktarılır, aksi halde uzak veri tercih edilir ve local fallback korunur.
+
 
 
 \## 3. Kesinleşen Kararlar

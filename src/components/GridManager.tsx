@@ -62,7 +62,7 @@ const PIN_LIMIT_MESSAGE = `En fazla ${MAX_PINNED} gönderi sabitlenebilir. Sabit
  * metaveri localStorage'da, görseller IndexedDB'de saklanır.
  * Saf durum geçişleri `lib/brand-ops.ts` içinde test edilir.
  */
-export default function GridManager() {
+export default function GridManager({ userEmail, onLogout }: { userEmail: string; onLogout: () => void }) {
   const {
     brand,
     existingPosts,
@@ -485,7 +485,7 @@ export default function GridManager() {
         </aside>
 
         <div className="min-w-0 flex-1">
-          <AppTopbar
+      <AppTopbar
             view={view}
             brands={brands}
             activeBrandId={activeBrandId}
@@ -500,7 +500,9 @@ export default function GridManager() {
               selectProject(id);
               setSelectedPostId(null);
             }}
-            onOpenSidebar={() => setSidebarOpen(true)}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        userEmail={userEmail}
+        onLogout={onLogout}
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
