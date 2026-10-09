@@ -96,6 +96,18 @@ SUPABASE_WORKSPACE_MEDIA_BUCKET=workspace-media
 
 Medya nesneleri `<auth.uid()>/<brandId>/<...>` mantığında private bucket’a yazılır. Image/video için kısa ömürlü signed URL kullanılır; 100 MB Reel yüklemeleri JSON/base64 yerine doğrudan signed binary upload ile aktarılır.
 
+### Instagram profil içe aktarma (Bright Data)
+
+Bright Data ile profil içe aktarma, uzun süren tarama isteklerinde tarayıcı bağlantısını açık tutmaz. `202610090001_create_instagram_import_jobs.sql` migration'ını da SQL Editor'da çalıştırın; snapshot kimliği yalnız server-side job tablosunda saklanır.
+
+```env
+INSTAGRAM_PROVIDER=brightdata
+INSTAGRAM_PROVIDER_API_KEY=<Bright Data server-side API key>
+INSTAGRAM_PROFILE_DATASET_ID=<Instagram Profiles dataset id>
+```
+
+Bu değişkenlerin hiçbirini `NEXT_PUBLIC_` ile başlatmayın. Kullanıcı arayüzü yalnız uygulamanın kendi iş kimliğini görür; Bright Data anahtarı ve snapshot kimliği tarayıcıya gönderilmez.
+
 ### İlk hesap ve teslim öncesi reset
 
 İlk hesap yalnızca sistemde hiç Supabase Auth kullanıcısı yokken gösterilir. Uygulama `/api/auth/bootstrap` üzerinden server-side singleton kilit ile ilk e-posta/şifre hesabını oluşturur; service-role anahtarı tarayıcıya gönderilmez. İlk kullanıcı oluşturulduktan sonra signup düğmesi kapanır. Supabase Dashboard’da genel **email signup** seçeneğini kapalı tutun; sonraki kullanıcılar yalnız mevcut hesabın giriş bilgileriyle oturum açar.

@@ -88,8 +88,7 @@ export default function BrandForm({
         return;
       }
 
-      if (data.ok && data.profile) {
-        const profile = data.profile as InstagramProfile;
+      const applyProfile = (profile: InstagramProfile, warnings?: unknown) => {
         setImportedProfile(profile);
         setSelectedPostIds(new Set((profile.recentPosts ?? []).map((post) => post.id)));
         setSelectedHighlightIds(new Set((profile.highlights ?? []).map((highlight) => highlight.id)));
@@ -103,9 +102,35 @@ export default function BrandForm({
         if (profile.postsCount !== undefined) setPostCount(profile.postsCount.toString());
         setShowAdvanced(true);
 
-        if (data.warnings && data.warnings.length > 0) {
-          setImportWarning(data.warnings.join(" "));
+        if (Array.isArray(warnings) && warnings.length > 0) {
+          setImportWarning(warnings.filter((warning): warning is string => typeof warning === "string").join(" "));
         }
+      };
+
+      if (response.status === 202 && typeof data.jobId === "string") {
+        setImportWarning("Instagram bilgileri hazırlanıyor...");
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+          const statusResponse = await fetch(withBasePath(`/api/instagram/profile-import?jobId=${encodeURIComponent(data.jobId)}`), {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          const statusData = await statusResponse.json().catch(() => null);
+          if (statusResponse.status === 202) continue;
+          if (!statusResponse.ok) {
+            setImportWarning(statusData?.error || "Instagram bilgileri hazırlanamadı. Lütfen tekrar deneyin.");
+            return;
+          }
+          if (statusData?.ok && statusData.profile) {
+            applyProfile(statusData.profile as InstagramProfile, statusData.warnings);
+            return;
+          }
+        }
+        setImportWarning("Instagram bilgileri hazırlanamadı. Lütfen tekrar deneyin.");
+        return;
+      }
+
+      if (data.ok && data.profile) {
+        applyProfile(data.profile as InstagramProfile, data.warnings);
       }
     } catch (e) {
       setImportWarning("Instagram bilgileri alınamadı.");
@@ -184,7 +209,7 @@ export default function BrandForm({
             disabled={isImporting || !instagramUrl.trim()}
             className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
           >
-            {isImporting ? "Instagram bilgileri alınıyor..." : "Instagram’dan Bilgileri Getir"}
+            {isImporting ? "Instagram bilgileri hazırlanıyor..." : "Instagram’dan Bilgileri Getir"}
           </button>
         </div>
         {importWarning && (
