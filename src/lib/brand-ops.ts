@@ -36,6 +36,10 @@ export interface NewBrandInput {
   postCount?: number;
   followersCount?: number;
   followingCount?: number;
+  /** Instagram import önizlemesinden kullanıcı tarafından seçilen gönderiler. */
+  importedPosts?: Array<{ id: string; thumbnailUrl: string; mediaUrl?: string; caption?: string; type?: "post" | "carousel" | "reel" | "unknown" }>;
+  /** Instagram import önizlemesinden kullanıcı tarafından seçilen öne çıkanlar. */
+  importedHighlights?: Array<{ id: string; title: string; coverUrl?: string }>;
 }
 
 /**
@@ -111,7 +115,11 @@ export function createBrandState(
     postCount: input.postCount,
     followersCount: input.followersCount,
     followingCount: input.followingCount,
-    highlights: [],
+    highlights: (input.importedHighlights ?? []).map((highlight) => ({
+      id: `instagram-highlight-${highlight.id}`,
+      title: highlight.title,
+      imageUrl: highlight.coverUrl,
+    })),
     hashtagGroups: [],
     defaultMentions: [],
     defaultCtas: [],
@@ -127,7 +135,17 @@ export function createBrandState(
     updatedAt: timestamp,
     brandId: brand.id,
     brand: { ...brand },
-    existingPosts: [],
+    existingPosts: (input.importedPosts ?? []).map((post, index) => ({
+      id: `instagram-post-${post.id}`,
+      source: "mevcut" as const,
+      imageUrl: post.thumbnailUrl,
+      videoUrl: post.type === "reel" ? post.mediaUrl : undefined,
+      mediaType: post.type === "reel" && post.mediaUrl ? "video" as const : undefined,
+      postType: post.type === "carousel" || post.type === "reel" ? post.type : "post",
+      caption: post.caption,
+      recencyIndex: index,
+      pinned: false,
+    })),
     plannedPosts: [],
   };
   const next: PersistedAppState = {

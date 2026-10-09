@@ -143,6 +143,17 @@ describe("marka oluşturma (§2/§3)", () => {
       createBrandState(getDefaultAppState(), { ...base, username: "" }, NOW),
     ).toBeNull();
   });
+
+  it("seçilen Instagram gönderi ve highlights'ını ilk projeye aktarır", () => {
+    const result = createBrandState(getDefaultAppState(), {
+      ...brandInput("Dijivo", "dijivo"),
+      importedPosts: [{ id: "ig-1", thumbnailUrl: "https://cdn.example.test/post.jpg", caption: "Yeni gönderi", type: "reel", mediaUrl: "https://cdn.example.test/reel.mp4" }],
+      importedHighlights: [{ id: "h-1", title: "Kampanya", coverUrl: "https://cdn.example.test/highlight.jpg" }],
+    }, NOW)!;
+    const project = projectFor(result.state, result.state.activeProjectId!);
+    expect(project.existingPosts[0]).toMatchObject({ source: "mevcut", postType: "reel", caption: "Yeni gönderi" });
+    expect(result.brand.highlights?.[0]).toMatchObject({ title: "Kampanya" });
+  });
 });
 
 describe("marka değiştirme ve izolasyon (§5/§20)", () => {
