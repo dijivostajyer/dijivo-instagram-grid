@@ -39,6 +39,7 @@ import {
   getDefaultAppState,
   selectBrandState,
   selectProjectState,
+  removeBrandState,
   syncActiveProject,
   updateBrandState,
 } from "../lib/brand-ops";
@@ -205,6 +206,7 @@ export interface PersistedGrid {
   persistVideoUpload: (objectUrl: string) => Promise<void>;
   /** Kalıcı veriyi siler ve temiz workspace'a (onboarding) döner. */
   resetToDefaults: () => Promise<void>;
+  deleteBrand: (id: string) => Promise<void>;
   /** Aktif markaya ait projeler (sıkı marka izolasyonu, §5). */
   projects: GridProject[];
   /** Tüm markaların projeleri (çapraz proje/marka kopyalama picker'ı için). */
@@ -524,6 +526,23 @@ export function usePersistedGrid(): PersistedGrid {
     commit(getDefaultAppState());
   }, [commit]);
 
+  const deleteBrand = useCallback(async (id: string) => {
+    const session = (await getSupabaseBrowserClient()?.auth.getSession())?.data.session;
+    if (!session) throw new Error("Markayı silmek için giriş yapın.");
+    const response = await fetch(withBasePath(`/api/workspace/brands/${encodeURIComponent(id)}`), {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || "Marka silinemedi.");
+    }
+    const next = removeBrandState(stateRef.current, id);
+    skipPersistRef.current = true;
+    clearPersistedState(getBrowserStorage());
+    commit(next);
+  }, [commit]);
+
   const selectProject = useCallback(
     (id: string) => {
       const next = selectProjectState(stateRef.current, id);
@@ -577,6 +596,7 @@ export function usePersistedGrid(): PersistedGrid {
     persistUpload,
     persistVideoUpload,
     resetToDefaults,
+    deleteBrand,
     projects: (state.projects ?? []).filter(
       (project) =>
         !state.activeBrandId || !project.brandId || project.brandId === state.activeBrandId,

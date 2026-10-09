@@ -323,6 +323,15 @@ export function updateBrandState(
   return syncActiveProject({ ...nextState, brand: next });
 }
 
+/** Seçili markayı ve ona bağlı aylık planları yerel workspace durumundan çıkarır. */
+export function removeBrandState(current: PersistedAppState, id: string): PersistedAppState {
+  const brands = (current.brands ?? []).filter((brand) => brand.id !== id);
+  const projects = (current.projects ?? []).filter((project) => project.brandId !== id);
+  if (!brands.length) return getDefaultAppState();
+  if (current.activeBrandId !== id) return { ...current, brands, projects };
+  return selectBrandState({ ...current, brands, projects }, brands[0].id) ?? getDefaultAppState();
+}
+
 /**
  * Aylık plan oluşturur (§4/§19). "Önceki ayı kopyala" yalnızca
  * aynı marka içinde kalır; başka marka asla otomatik kaynak

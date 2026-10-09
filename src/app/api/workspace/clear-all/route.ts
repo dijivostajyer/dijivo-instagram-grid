@@ -101,11 +101,6 @@ export async function POST(request: NextRequest) {
         logFailure("delete_calendar_items", calendarError);
         return NextResponse.json({ error: "Takvim verileri silinemedi." }, { status: 500 });
       }
-      const { error: subscriptionsError } = await client.from("push_subscriptions").delete().in("brand_id", brandIds);
-      if (subscriptionsError) {
-        logFailure("delete_push_subscriptions", subscriptionsError);
-        return NextResponse.json({ error: "Takvim abonelikleri silinemedi." }, { status: 500 });
-      }
     }
 
     const deletionResults = await Promise.all([
@@ -114,6 +109,7 @@ export async function POST(request: NextRequest) {
       client.from("workspace_posts").delete().eq("user_id", userId),
       client.from("workspace_projects").delete().eq("user_id", userId),
       client.from("workspace_brands").delete().eq("user_id", userId),
+      client.from("instagram_import_jobs").delete().eq("user_id", userId),
       client.from("share_snapshots").delete(),
     ]);
     const failed = deletionResults.find((result) => result.error)?.error;

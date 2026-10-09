@@ -255,6 +255,16 @@ export default function GridPreview({
               {brand.website}
             </a>
           ) : null}
+          {brand.username ? (
+            <a
+              href={`https://www.instagram.com/${encodeURIComponent(brand.username)}/`}
+              target="_blank"
+              rel="noreferrer"
+              className={`mt-1 block text-sm font-medium text-sky-700 hover:underline dark:text-sky-400`}
+            >
+              Instagram profilini aç
+            </a>
+          ) : null}
         </div>
       </header>
 
@@ -350,9 +360,10 @@ export default function GridPreview({
           ))}
         </div>
       ) : (
-        <p className={`px-4 py-10 text-center text-sm ${textMuted}`}>
-          {tab === "reels" ? "Bu profilde reel yok." : "Henüz gönderi yok."}
-        </p>
+        <div className={`px-4 py-10 text-center ${textMuted}`}>
+          <p className="text-sm font-semibold">{tab === "reels" ? "Bu profilde reel yok." : "Henüz gönderi eklenmedi."}</p>
+          {tab === "post" ? <p className="mx-auto mt-1 max-w-sm text-sm">Instagram’dan gönderi içe aktarabilir veya manuel olarak yeni gönderi ekleyebilirsiniz.</p> : null}
+        </div>
       )}
 
       <p className={`mt-4 px-4 pb-4 text-sm ${textMuted}`}>

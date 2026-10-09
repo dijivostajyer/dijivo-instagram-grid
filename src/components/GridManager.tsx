@@ -80,6 +80,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     persistUpload,
     persistVideoUpload,
     resetToDefaults,
+    deleteBrand,
     projects,
     allProjects,
     activeProjectId,
@@ -758,24 +759,12 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                       Sabitlenmiş gönderi limiti dolu. Yeni bir pin için önce birini kaldırın.
                     </p>
                   )}
-                  {grid.cells.length === 0 ? (
-                    <div className="grid min-h-96 place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
-                      <div>
-                        <PhotoIcon className="mx-auto mb-3 size-6 text-neutral-400" aria-hidden="true" />
-                        <h3 className="font-semibold">Grid henüz boş</h3>
-                        <p className="mt-1 max-w-xs text-sm text-neutral-500">
-                          Sol panelden mevcut veya planlanan bir görsel ekleyerek başlayın.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <GridPreview
-                      brand={brand}
-                      result={grid}
-                      selectedPostId={selectedPostId}
-                      onSelectPost={setSelectedPostId}
-                    />
-                  )}
+                  <GridPreview
+                    brand={brand}
+                    result={grid}
+                    selectedPostId={selectedPostId}
+                    onSelectPost={setSelectedPostId}
+                  />
                   <p className="mt-3 text-sm text-neutral-500">
                     Görseller Instagram profilindeki gibi merkezden 1:1 kırpılır ({GRID_COLUMNS} sütun).
                   </p>
@@ -790,6 +779,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                 onChange={setBrand}
                 brands={brands}
                 onCopyHighlight={copyHighlightToBrand}
+                onDelete={async () => { await deleteBrand(activeBrandId); setView("brands"); }}
               />
             ) : null}
 

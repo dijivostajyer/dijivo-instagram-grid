@@ -18,14 +18,18 @@ export default function SettingsPage({
 }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleConfirmDelete = async () => {
     setIsDeleting(true);
+    setDeleteError(null);
     try {
       await onReset();
+      setShowConfirm(false);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Veriler temizlenemedi. Lütfen tekrar deneyin.");
     } finally {
       setIsDeleting(false);
-      setShowConfirm(false);
     }
   };
 
@@ -60,7 +64,7 @@ export default function SettingsPage({
         </p>
         <button
           type="button"
-          onClick={() => setShowConfirm(true)}
+          onClick={() => { setDeleteError(null); setShowConfirm(true); }}
           disabled={isDeleting}
           className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
         >
@@ -114,6 +118,7 @@ export default function SettingsPage({
                   {isDeleting ? "Siliniyor..." : "Tüm Verileri Sil"}
                 </button>
               </div>
+              {deleteError ? <p role="alert" className="mt-3 text-sm font-medium text-red-700">{deleteError}</p> : null}
             </div>
           </div>
         </div>
