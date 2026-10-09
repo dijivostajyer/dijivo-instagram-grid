@@ -162,7 +162,8 @@ export default function BrandForm({
       importedPosts: (importedProfile?.recentPosts ?? []).filter((post) => selectedPostIds.has(post.id) && Boolean(post.thumbnailUrl)).map((post) => ({
         id: post.id,
         thumbnailUrl: post.thumbnailUrl!,
-        mediaUrl: post.mediaUrl,
+        videoUrl: post.videoUrl,
+        permalinkUrl: post.permalinkUrl,
         caption: post.caption,
         type: post.type,
       })),

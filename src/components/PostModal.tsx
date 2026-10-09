@@ -19,6 +19,7 @@ import {
   type NewBrandInput,
 } from "@/hooks/use-persisted-grid";
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
+import { isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
 import {
   MAX_VIDEO_BYTES,
   loadCoverFile,
@@ -97,7 +98,9 @@ export default function PostModal({
   const [theme, toggleTheme] = useInstagramPreviewTheme();
   const dark = theme === "dark";
   // §7: Reel durumu — video varsa modal video önizlemesi açar.
-  const isReel = post.mediaType === "video" && Boolean(post.videoUrl);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const isReel = !videoFailed && post.mediaType === "video" && isPlayableVideoUrl(post.videoUrl);
+  const externalUrl = post.externalUrl ?? (isInstagramPostUrl(post.videoUrl) ? post.videoUrl : undefined);
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +125,8 @@ export default function PostModal({
       if (videoRef.current) videoRef.current.pause();
     };
   }, []);
+
+  useEffect(() => setVideoFailed(false), [post.id, post.videoUrl]);
 
   async function handleVideoChange(files: FileList | null) {
     if (!files?.length) return;
@@ -296,6 +301,7 @@ export default function PostModal({
                 preload="metadata"
                 className="absolute inset-0 size-full object-contain"
                 aria-label="Reel video önizlemesi"
+                onError={() => setVideoFailed(true)}
               />
             </div>
           ) : (
@@ -306,6 +312,16 @@ export default function PostModal({
                 alt={title}
                 className="absolute inset-0 size-full object-cover"
               />
+              {post.postType === "reel" ? (
+                <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/60 px-3 py-2 text-xs font-medium text-white">
+                  <span>Reel</span>
+                  {externalUrl ? (
+                    <a href={externalUrl} target="_blank" rel="noreferrer" className="rounded bg-white/15 px-2 py-1 hover:bg-white/25">
+                      Instagram&apos;da Aç
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           )}
 

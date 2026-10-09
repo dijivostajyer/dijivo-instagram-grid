@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BookmarkIcon,
   ChatBubbleOvalLeftIcon,
@@ -12,6 +12,7 @@ import {
 } from "@heroicons/react/16/solid";
 
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
+import { isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
 import type { Brand, ExistingPost, PlannedPost } from "@/lib/types";
 
 /**
@@ -42,7 +43,9 @@ export default function SharePostModal({
 
   // Reel medya durumu; video URL'i olmayan eski reel kayıtları
   // görsel gönderi gibi açılır (§4/§5 güvenli fallback).
-  const isReel = post.mediaType === "video" && Boolean(post.videoUrl);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const isReel = !videoFailed && post.mediaType === "video" && isPlayableVideoUrl(post.videoUrl);
+  const externalUrl = post.externalUrl ?? (isInstagramPostUrl(post.videoUrl) ? post.videoUrl : undefined);
   const title = post.alt ?? post.id;
   const caption = post.caption ?? "";
   const captionParts = caption.split(/(#[\p{L}\d_]+)/gu);
@@ -73,6 +76,8 @@ export default function SharePostModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => setVideoFailed(false), [post.id, post.videoUrl]);
 
   const darkSurface = dark ? "bg-[#0a0a0a]" : "bg-white";
   const darkText = dark ? "text-neutral-100" : "text-neutral-900";
@@ -139,6 +144,7 @@ export default function SharePostModal({
                 preload="metadata"
                 className="absolute inset-0 size-full object-contain"
                 aria-label={`Reel videosu: ${title}`}
+                onError={() => setVideoFailed(true)}
               />
             </div>
           ) : (
@@ -189,12 +195,17 @@ export default function SharePostModal({
               </span>
             ) : null}
             {post.postType === "reel" && !isReel ? (
-              <span
-                className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${dark ? "bg-neutral-800 text-neutral-300" : "bg-neutral-100 text-neutral-600"}`}
-              >
-                <PlayIcon className="size-3.5" aria-hidden="true" />
-                Reel
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${dark ? "bg-neutral-800 text-neutral-300" : "bg-neutral-100 text-neutral-600"}`}>
+                  <PlayIcon className="size-3.5" aria-hidden="true" />
+                  Reel
+                </span>
+                {externalUrl ? (
+                  <a href={externalUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-sky-700 underline hover:text-sky-800">
+                    Instagram&apos;da Aç
+                  </a>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>

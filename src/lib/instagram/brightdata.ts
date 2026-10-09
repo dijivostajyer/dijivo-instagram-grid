@@ -5,6 +5,7 @@ import type {
   InstagramProvider,
   InstagramProviderResult,
 } from "./types";
+import { isInstagramPostUrl, isPlayableVideoUrl } from "../reel-media";
 
 const API_BASE = "https://api.brightdata.com/datasets/v3";
 const DEFAULT_TIMEOUT_MS = 65_000;
@@ -84,15 +85,22 @@ function normalizePosts(value: unknown): InstagramPost[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item, index) => {
     if (!isRecord(item)) return [];
-    const thumbnailUrl = url(item.thumbnail_url, item.thumbnail, item.display_url, item.image_url, item.media_url, item.url);
-    const mediaUrl = url(item.media_url, item.video_url, item.display_url, item.image_url);
-    if (!thumbnailUrl && !mediaUrl) return [];
+    const type = postType(item.content_type ?? item.type ?? item.media_type);
+    // `url`/`permalink` bir Instagram post sayfası olabilir. Bunları kapak
+    // veya video kaynağına koymak, bozuk <video> elemanlarına neden olur.
+    const permalinkUrl = url(item.permalink, item.post_url, item.url, item.link);
+    const explicitVideoUrl = url(item.video_url);
+    const thumbnailUrl = url(item.thumbnail_url, item.thumbnail, item.display_url, item.image_url)
+      ?? (type !== "reel" ? url(item.media_url) : undefined);
+    const videoUrl = isPlayableVideoUrl(explicitVideoUrl) ? explicitVideoUrl : undefined;
+    if (!thumbnailUrl) return [];
     const id = text(item.id) ?? text(item.pk) ?? text(item.shortcode) ?? text(item.code) ?? `brightdata-post-${index}`;
     return [{
       id,
-      type: postType(item.content_type ?? item.type ?? item.media_type),
-      thumbnailUrl: thumbnailUrl ?? mediaUrl,
-      mediaUrl,
+      type,
+      thumbnailUrl,
+      videoUrl,
+      permalinkUrl: isInstagramPostUrl(permalinkUrl) ? permalinkUrl : undefined,
       caption: text(item.caption ?? item.description),
       postedAt: text(item.datetime ?? item.timestamp ?? item.taken_at),
     }];

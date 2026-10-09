@@ -330,6 +330,24 @@ describe("isShareableVideoUrl (§4/§22)", () => {
     ).toBe(false);
     expect(isShareableVideoUrl("data:image/png;base64,iVBORw0KGgo=")).toBe(false);
     expect(isShareableVideoUrl("not-a-url")).toBe(false);
+    expect(isShareableVideoUrl("https://www.instagram.com/reel/ABC123/")).toBe(false);
+  });
+
+  it("Instagram permalink'ini video yerine fallback bağlantısı olarak taşır", () => {
+    const existing: ExistingPost[] = [{
+      id: "legacy-reel",
+      source: "mevcut",
+      imageUrl: "https://example.com/cover.jpg",
+      recencyIndex: 0,
+      pinned: false,
+      postType: "reel",
+      mediaType: "video",
+      videoUrl: "https://www.instagram.com/reel/C0ffee/",
+    }];
+    const cell = shareInputFromGrid(BRAND, computeGrid(existing, [])).cells[0];
+    expect(cell.videoUrl).toBeUndefined();
+    expect(cell.externalUrl).toBe("https://www.instagram.com/reel/C0ffee/");
+    expect(validateShareCreateInput({ ...input(), cells: [cell] })).not.toBeNull();
   });
 });
 

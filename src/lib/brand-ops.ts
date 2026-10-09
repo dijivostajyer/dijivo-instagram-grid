@@ -37,7 +37,7 @@ export interface NewBrandInput {
   followersCount?: number;
   followingCount?: number;
   /** Instagram import önizlemesinden kullanıcı tarafından seçilen gönderiler. */
-  importedPosts?: Array<{ id: string; thumbnailUrl: string; mediaUrl?: string; caption?: string; type?: "post" | "carousel" | "reel" | "unknown" }>;
+  importedPosts?: Array<{ id: string; thumbnailUrl: string; videoUrl?: string; permalinkUrl?: string; caption?: string; type?: "post" | "carousel" | "reel" | "unknown" }>;
   /** Instagram import önizlemesinden kullanıcı tarafından seçilen öne çıkanlar. */
   importedHighlights?: Array<{ id: string; title: string; coverUrl?: string }>;
 }
@@ -139,8 +139,9 @@ export function createBrandState(
       id: `instagram-post-${post.id}`,
       source: "mevcut" as const,
       imageUrl: post.thumbnailUrl,
-      videoUrl: post.type === "reel" ? post.mediaUrl : undefined,
-      mediaType: post.type === "reel" && post.mediaUrl ? "video" as const : undefined,
+      videoUrl: post.type === "reel" ? post.videoUrl : undefined,
+      mediaType: post.type === "reel" && post.videoUrl ? "video" as const : undefined,
+      externalUrl: post.type === "reel" ? post.permalinkUrl : undefined,
       postType: post.type === "carousel" || post.type === "reel" ? post.type : "post",
       caption: post.caption,
       recencyIndex: index,
@@ -459,6 +460,7 @@ export function copyPostToProjectState(
       mediaType: sourcePost.mediaType,
       videoUrl: sourcePost.videoUrl,
       coverImageUrl: sourcePost.coverImageUrl,
+      externalUrl: sourcePost.externalUrl,
     });
     let nextPosts = posts;
     if (options.pinned && (sourcePost as ExistingPost).pinned) {
@@ -489,6 +491,7 @@ export function copyPostToProjectState(
         mediaType: sourcePost.mediaType,
         videoUrl: sourcePost.videoUrl,
         coverImageUrl: sourcePost.coverImageUrl,
+        externalUrl: sourcePost.externalUrl,
       });
       const projects = allProjects.map((project) =>
         project.id === target.id

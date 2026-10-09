@@ -101,9 +101,10 @@ export function normalizeInstagramProfile(profile: import("./types").InstagramPr
     isVerified: profile.isVerified === true,
     recentPosts: (profile.recentPosts ?? []).flatMap((post) => {
       const thumbnailUrl = optionalHttpUrl(post.thumbnailUrl);
-      const mediaUrl = optionalHttpUrl(post.mediaUrl);
+      const videoUrl = optionalHttpUrl(post.videoUrl);
+      const permalinkUrl = optionalHttpUrl(post.permalinkUrl);
       if (!post.id || !thumbnailUrl) return [];
-      return [{ id: String(post.id), type: post.type, thumbnailUrl, mediaUrl, caption: optionalText(post.caption), postedAt: optionalText(post.postedAt) }];
+      return [{ id: String(post.id), type: post.type, thumbnailUrl, videoUrl, permalinkUrl, caption: optionalText(post.caption), postedAt: optionalText(post.postedAt) }];
     }),
     highlights: (profile.highlights ?? []).flatMap((highlight) => {
       if (!highlight.id || !optionalText(highlight.title)) return [];

@@ -39,7 +39,7 @@ const RECORD = {
   is_verified: true,
   posts: [
     { id: "image-1", content_type: "Image", thumbnail_url: "https://cdn.example.test/image.jpg", caption: "Merhaba", datetime: "2026-10-01" },
-    { id: "reel-1", content_type: "Reel", thumbnail_url: "https://cdn.example.test/reel.jpg", media_url: "https://cdn.example.test/reel.mp4" },
+    { id: "reel-1", content_type: "Reel", thumbnail_url: "https://cdn.example.test/reel.jpg", video_url: "https://cdn.example.test/reel.mp4", permalink: "https://www.instagram.com/reel/reel-1/" },
     { id: "carousel-1", content_type: "Carousel", thumbnail_url: "https://cdn.example.test/carousel.jpg" },
   ],
   highlights: [{ id: "h1", title: "Kampanya", highlight_url: "https://instagram.com/stories/highlights/h1", cover_url: "https://cdn.example.test/cover.jpg" }],
@@ -53,7 +53,7 @@ describe("Bright Data Instagram provider", () => {
     expect(result.profile).toMatchObject({ username: "dijivo", displayName: "Dijivo Studio", followersCount: 1200, followingCount: 24, postsCount: 3, isVerified: true });
     expect(result.profile?.recentPosts).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "image-1", type: "post" }),
-      expect.objectContaining({ id: "reel-1", type: "reel", mediaUrl: "https://cdn.example.test/reel.mp4" }),
+      expect.objectContaining({ id: "reel-1", type: "reel", videoUrl: "https://cdn.example.test/reel.mp4", permalinkUrl: "https://www.instagram.com/reel/reel-1/" }),
       expect.objectContaining({ id: "carousel-1", type: "carousel" }),
     ]));
     expect(result.profile?.highlights).toEqual([expect.objectContaining({ id: "h1", title: "Kampanya" })]);
@@ -68,6 +68,26 @@ describe("Bright Data Instagram provider", () => {
     const result = await instance.fetchProfile("kismi");
     expect(result.profile).toMatchObject({ username: "kismi" });
     expect(result.profile?.recentPosts).toEqual([]);
+  });
+
+  it("Reel permalink'ini video kaynağına dönüştürmez", async () => {
+    const { instance } = provider([json([{
+      account: "dijivo",
+      posts: [{
+        id: "reel-link",
+        content_type: "Reel",
+        thumbnail_url: "https://cdn.example.test/reel-cover.jpg",
+        media_url: "https://www.instagram.com/reel/C0ffee/",
+        permalink: "https://www.instagram.com/reel/C0ffee/",
+      }],
+    }])]);
+    const result = await instance.fetchProfile("dijivo");
+    expect(result.profile?.recentPosts?.[0]).toMatchObject({
+      id: "reel-link",
+      thumbnailUrl: "https://cdn.example.test/reel-cover.jpg",
+      permalinkUrl: "https://www.instagram.com/reel/C0ffee/",
+    });
+    expect(result.profile?.recentPosts?.[0]?.videoUrl).toBeUndefined();
   });
 
   it("gizli hesapta profil ile Türkçe uyarıyı birlikte döndürür", async () => {

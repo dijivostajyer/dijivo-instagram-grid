@@ -7,6 +7,20 @@ import GridManager from "@/components/GridManager";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { withBasePath } from "@/lib/base-path";
 
+function AuthBrand({ title }: { title: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={withBasePath("/brand/dijivo-logo.png")}
+        alt="Dijivo"
+        className="h-9 w-auto max-w-32 object-contain"
+      />
+      <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
+    </div>
+  );
+}
+
 export default function AuthGate() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [email, setEmail] = useState("");
@@ -93,7 +107,7 @@ export default function AuthGate() {
   if (canBootstrap === false) {
     return <main className="min-h-screen grid place-items-center bg-slate-50 p-6">
       <form className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-sm" onSubmit={(event) => { event.preventDefault(); void handleSignIn(); }}>
-        <h1 className="text-xl font-semibold">Dijivo Workspace</h1>
+        <AuthBrand title="Dijivo Workspace" />
         <p className="mt-2 text-sm text-slate-600">Workspace'ınıza güvenle giriş yapın.</p>
         <label className="mt-5 block text-sm">E-posta<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded border p-2" /></label>
         <label className="mt-3 block text-sm">Şifre<input required minLength={6} type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded border p-2" /></label>
@@ -109,7 +123,7 @@ export default function AuthGate() {
       // İlk aşama: Sadece açıklama + buton
       return <main className="min-h-screen grid place-items-center bg-slate-50 p-6">
         <div className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-sm text-center">
-          <h1 className="text-xl font-semibold">Dijivo Workspace</h1>
+          <AuthBrand title="Dijivo Workspace" />
           <p className="mt-4 text-sm text-slate-600">
             Bu çalışma alanında henüz bir kullanıcı bulunmuyor. İlk yönetici hesabını oluşturarak başlayabilirsiniz.
           </p>
@@ -127,7 +141,7 @@ export default function AuthGate() {
     // İkinci aşama: Form
     return <main className="min-h-screen grid place-items-center bg-slate-50 p-6">
       <form className="w-full max-w-sm rounded-2xl bg-white p-7 shadow-sm" onSubmit={(event) => { event.preventDefault(); void handleBootstrap(); }}>
-        <h1 className="text-xl font-semibold">İlk Hesabı Oluştur</h1>
+        <AuthBrand title="İlk Hesabı Oluştur" />
         <p className="mt-2 text-sm text-slate-600">Yönetici hesabınızı oluşturun.</p>
         <label className="mt-5 block text-sm">E-posta<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded border p-2" /></label>
         <label className="mt-3 block text-sm">Şifre<input required minLength={6} type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded border p-2" /></label>

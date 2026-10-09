@@ -50,6 +50,7 @@ function gridResultFromSnapshot(
     mediaType?: "image" | "video";
     videoUrl?: string;
     coverImageUrl?: string;
+    externalUrl?: string;
   }>,
 ): GridResult {
   const ordered = [...cells].sort((a, b) => a.position - b.position);
@@ -73,6 +74,7 @@ function gridResultFromSnapshot(
               mediaType: cell.mediaType,
               videoUrl: cell.videoUrl,
               coverImageUrl: cell.coverImageUrl,
+              externalUrl: cell.externalUrl,
             }
           : {
               id: cell.id,
@@ -85,6 +87,7 @@ function gridResultFromSnapshot(
               mediaType: cell.mediaType,
               videoUrl: cell.videoUrl,
               coverImageUrl: cell.coverImageUrl,
+              externalUrl: cell.externalUrl,
             },
     })),
     rowCount: Math.ceil(ordered.length / 3),

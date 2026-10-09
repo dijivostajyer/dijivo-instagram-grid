@@ -101,6 +101,8 @@ export function addExistingPost(
     videoUrl?: string;
     /** Reel kapak görseli URL'si. */
     coverImageUrl?: string;
+    /** Oynatıcı yoksa açılacak Instagram Reel permalink'i. */
+    externalUrl?: string;
   },
 ): { posts: ExistingPost[]; post: ExistingPost } {
   const maxRecency = posts.reduce((m, p) => Math.max(m, p.recencyIndex), -1);
@@ -117,6 +119,7 @@ export function addExistingPost(
       mediaType: input.mediaType,
       videoUrl: input.videoUrl,
       coverImageUrl: input.coverImageUrl,
+      externalUrl: input.externalUrl,
       recencyIndex: 0,
       pinned: false,
     };
@@ -133,6 +136,7 @@ export function addExistingPost(
     mediaType: input.mediaType,
     videoUrl: input.videoUrl,
     coverImageUrl: input.coverImageUrl,
+    externalUrl: input.externalUrl,
     recencyIndex: maxRecency + 1,
     pinned: false,
   };
@@ -165,6 +169,8 @@ export function addPlannedPost(
     videoUrl?: string;
     /** Reel kapak görseli URL'si. */
     coverImageUrl?: string;
+    /** Oynatıcı yoksa açılacak Instagram Reel permalink'i. */
+    externalUrl?: string;
   },
 ): { posts: PlannedPost[]; post: PlannedPost } {
   const shifted = posts.map((p) => ({ ...p, planOrder: p.planOrder + 1 }));
@@ -179,6 +185,7 @@ export function addPlannedPost(
     mediaType: input.mediaType,
     videoUrl: input.videoUrl,
     coverImageUrl: input.coverImageUrl,
+    externalUrl: input.externalUrl,
     planOrder: 0,
   };
   return { posts: [post, ...shifted], post };

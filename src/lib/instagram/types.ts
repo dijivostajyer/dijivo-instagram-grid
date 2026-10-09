@@ -7,7 +7,10 @@ export interface InstagramPost {
   id: string;
   type: "post" | "carousel" | "reel" | "unknown";
   thumbnailUrl?: string;
-  mediaUrl?: string;
+  /** Yalnızca doğrudan oynatılabilir video kaynağı. */
+  videoUrl?: string;
+  /** Instagram gönderi/reel sayfası; hiçbir zaman video src olarak kullanılmaz. */
+  permalinkUrl?: string;
   caption?: string;
   postedAt?: string;
 }

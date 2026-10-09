@@ -7,6 +7,7 @@ import { getSupabaseBrowserClient } from "./supabase-browser";
 import type { GridProject, PersistedAppState } from "./storage";
 import type { Brand, ExistingPost, PlannedPost } from "./types";
 import { isWorkspaceMediaRef, uploadWorkspaceMedia, workspaceMediaPath } from "./workspace-media-store";
+import { isInstagramPostUrl } from "./reel-media";
 
 type BrandRow = Record<string, unknown>;
 type PostRow = Record<string, unknown>;
@@ -23,10 +24,28 @@ async function materializeMedia(state: PersistedAppState): Promise<PersistedAppS
     profileImageUrl: await upload(item.profileImageUrl, `${item.id}/profile`),
     highlights: await Promise.all((item.highlights ?? []).map(async (highlight) => ({ ...highlight, imageUrl: await upload(highlight.imageUrl, `${item.id}/highlight`) }))),
   });
-  const materializePost = async <T extends ExistingPost | PlannedPost>(item: T, brandId: string): Promise<T> => ({
-    ...item, imageUrl: (await upload(item.imageUrl, `${brandId}/post`)) ?? item.imageUrl,
-    videoUrl: await upload(item.videoUrl, `${brandId}/video`), coverImageUrl: await upload(item.coverImageUrl, `${brandId}/cover`),
-  });
+  const materializePost = async <T extends ExistingPost | PlannedPost>(item: T, brandId: string): Promise<T> => {
+    const externalUrl = item.externalUrl ?? (isInstagramPostUrl(item.videoUrl) ? item.videoUrl : undefined);
+    let videoUrl: string | undefined;
+    try {
+      // Eski kayıtların yanlışlıkla video alanına yazdığı Instagram
+      // permalink'i Storage'a kopyalanmaya çalışılmaz.
+      videoUrl = isInstagramPostUrl(item.videoUrl) ? undefined : await upload(item.videoUrl, `${brandId}/video`);
+    } catch (error) {
+      // Dış CDN videosu indirilemiyorsa tüm çalışma alanı yazımını bozma.
+      // Kapak + Instagram permalink fallback'i korunur.
+      if (!externalUrl) throw error;
+      console.warn("[workspace] Reel videosu kopyalanamadı; fallback kullanılacak", { postId: item.id });
+    }
+    return {
+      ...item,
+      externalUrl,
+      imageUrl: (await upload(item.imageUrl, `${brandId}/post`)) ?? item.imageUrl,
+      videoUrl,
+      mediaType: videoUrl ? item.mediaType : (item.mediaType === "video" ? "image" : item.mediaType),
+      coverImageUrl: await upload(item.coverImageUrl, `${brandId}/cover`),
+    };
+  };
   const brands = await Promise.all((state.brands ?? []).map(brand));
   const projects = await Promise.all((state.projects ?? []).map(async (project) => ({
     ...project, brand: await brand(project.brand), existingPosts: await Promise.all(project.existingPosts.map((item) => materializePost(item, project.brandId ?? project.brand.id))), plannedPosts: await Promise.all(project.plannedPosts.map((item) => materializePost(item, project.brandId ?? project.brand.id))),
@@ -125,7 +144,7 @@ export async function pullWorkspace(user: User): Promise<PersistedAppState | nul
   const brands: Brand[] = rawBrands.map((row) => ({ id: String(row.id), name: String(row.name), username: String(row.username), displayName: row.display_name as string | undefined, profileImageUrl: ref(row.profile_image_path), bio: row.bio as string | undefined, website: row.website as string | undefined, phone: row.phone as string | undefined, email: row.email as string | undefined, category: row.category as string | undefined, postCount: row.post_count as number | undefined, followersCount: row.followers_count as number | undefined, followingCount: row.following_count as number | undefined, hashtagGroups: (row.hashtag_groups as Brand["hashtagGroups"]) ?? [], defaultMentions: (row.default_mentions as string[]) ?? [], defaultCtas: (row.default_ctas as string[]) ?? [], highlights: rawHighlights.filter((h) => h.brand_id === row.id).map((h) => ({ id: String(h.id), title: String(h.title), imageUrl: ref(h.image_path) })) }));
   const rawPosts = (postsResult.data ?? []) as PostRow[];
   const projects: GridProject[] = ((projectsResult.data ?? []) as BrandRow[]).map((project) => {
-    const mapPost = (row: PostRow) => ({ id: String(row.id), source: row.source as "mevcut" | "planlanan", imageUrl: ref(row.image_path) ?? "", alt: row.alt as string | undefined, aspectRatio: row.aspect_ratio as ExistingPost["aspectRatio"], postType: row.post_type as ExistingPost["postType"], caption: row.caption as string | undefined, mediaType: row.media_type as ExistingPost["mediaType"], videoUrl: ref(row.video_path), coverImageUrl: ref(row.cover_path), recencyIndex: row.recency_index as number, planOrder: row.plan_order as number, pinned: Boolean(row.pinned), pinnedOrder: row.pinned_order as number | undefined });
+    const mapPost = (row: PostRow) => ({ id: String(row.id), source: row.source as "mevcut" | "planlanan", imageUrl: ref(row.image_path) ?? "", alt: row.alt as string | undefined, aspectRatio: row.aspect_ratio as ExistingPost["aspectRatio"], postType: row.post_type as ExistingPost["postType"], caption: row.caption as string | undefined, mediaType: row.media_type as ExistingPost["mediaType"], videoUrl: ref(row.video_path), coverImageUrl: ref(row.cover_path), externalUrl: row.external_url as string | undefined, recencyIndex: row.recency_index as number, planOrder: row.plan_order as number, pinned: Boolean(row.pinned), pinnedOrder: row.pinned_order as number | undefined });
     const posts = rawPosts.filter((post) => post.project_id === project.id);
     return { id: String(project.id), name: String(project.name), month: Number(project.month), year: Number(project.year), createdAt: String(project.created_at), updatedAt: String(project.updated_at), brandId: String(project.brand_id), brand: brands.find((brand) => brand.id === project.brand_id) ?? brands[0], existingPosts: posts.filter((post) => post.source === "mevcut").map(mapPost) as ExistingPost[], plannedPosts: posts.filter((post) => post.source === "planlanan").map(mapPost) as PlannedPost[] };
   });
@@ -144,7 +163,7 @@ export async function pushWorkspace(user: User, input: PersistedAppState): Promi
   if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw new Error(`workspace_brands yazılamadı: ${error.message}`); }
   const projects = state.projects ?? [];
   if (projects.length) { const { error } = await db.from("workspace_projects").upsert(projects.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) throw new Error(`workspace_projects yazılamadı: ${error.message}`); }
-  const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl) })));
+  const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl), external_url: post.externalUrl ?? null })));
   if (postRows.length) {
     const { data, error } = await db.from("workspace_posts").upsert(postRows, { onConflict: "id" }).select("id, project_id");
     if (error) throw new Error(`workspace_posts yazılamadı: ${error.message}`);

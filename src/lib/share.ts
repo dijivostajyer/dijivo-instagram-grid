@@ -1,5 +1,6 @@
 import type { Brand, GridResult, PostSource, PostType, Highlight } from "./types";
 import { isValidShareToken } from "./share-token";
+import { isHttpUrl, isInstagramPostUrl, isPlayableVideoUrl } from "./reel-media";
 
 export const SHARE_SNAPSHOT_VERSION = 1;
 export const MAX_SHARE_CELLS = 60;
@@ -39,6 +40,8 @@ export interface ShareGridCell {
   videoUrl?: string;
   /** Reel kapak görseli URL'si (grid'de video yerine gösterilir). */
   coverImageUrl?: string;
+  /** Oynatıcı kullanılamazsa açılacak özgün Reel permalink'i. */
+  externalUrl?: string;
 }
 
 export interface ShareSnapshotInput {
@@ -95,12 +98,7 @@ export function isShareableVideoUrl(value: string, allowWorkspaceMedia = false):
   if (/^data:video\/(?:mp4|webm);base64,[a-z0-9+/=]+$/i.test(value)) {
     return true;
   }
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
-  }
+  return isPlayableVideoUrl(value);
 }
 
 function isShareBrand(value: unknown, allowWorkspaceMedia: boolean): value is ShareBrand {
@@ -135,6 +133,7 @@ function isShareGridCell(value: unknown, allowWorkspaceMedia: boolean): value is
     (value.mediaType === undefined || value.mediaType === "image" || value.mediaType === "video") &&
     (value.videoUrl === undefined || (typeof value.videoUrl === "string" && isShareableVideoUrl(value.videoUrl, allowWorkspaceMedia))) &&
     (value.coverImageUrl === undefined || (typeof value.coverImageUrl === "string" && isShareableImageUrl(value.coverImageUrl, allowWorkspaceMedia)))
+    && (value.externalUrl === undefined || (typeof value.externalUrl === "string" && isHttpUrl(value.externalUrl)))
   );
 }
 
@@ -182,7 +181,7 @@ export function describeInvalidShareInput(value: unknown): string {
     if (cell.source !== "mevcut" && cell.source !== "planlanan") return `cells[${index}].source geçersiz`;
     for (const field of ["position", "row", "column"] as const) if (typeof cell[field] !== "number") return `cells[${index}].${field} number değil`;
     if (typeof cell.pinned !== "boolean") return `cells[${index}].pinned boolean değil`;
-    for (const field of ["alt", "caption", "videoUrl", "coverImageUrl"] as const) if (!isOptionalString(cell[field])) return `cells[${index}].${field} string|undefined değil`;
+    for (const field of ["alt", "caption", "videoUrl", "coverImageUrl", "externalUrl"] as const) if (!isOptionalString(cell[field])) return `cells[${index}].${field} string|undefined değil`;
     if (cell.mediaType !== undefined && cell.mediaType !== "image" && cell.mediaType !== "video") return `cells[${index}].mediaType geçersiz`;
   }
   return "görsel/video URL şeması veya highlight alanı geçersiz";
@@ -249,7 +248,14 @@ export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnaps
       followingCount: typeof brand.followingCount === "number" ? brand.followingCount : undefined,
       highlights: brand.highlights?.map((highlight) => ({ ...highlight, imageUrl: typeof highlight.imageUrl === "string" ? highlight.imageUrl : undefined })),
     },
-    cells: result.cells.map((cell) => ({
+    cells: result.cells.map((cell) => {
+      const rawVideoUrl = cell.post.videoUrl;
+      const fallbackUrl = cell.post.externalUrl ?? (isInstagramPostUrl(rawVideoUrl) ? rawVideoUrl : undefined);
+      // Yerel blob/idb video referansları `prepareShareInput` tarafından
+      // data URL veya workspace-media ref'e dönüştürülür. Burada yalnızca
+      // Instagram permalink'ini video yuvasından çıkarıyoruz.
+      const videoUrl = isInstagramPostUrl(rawVideoUrl) ? undefined : rawVideoUrl;
+      return {
       id: cell.post.id,
       source: cell.post.source,
       imageUrl: cell.post.imageUrl,
@@ -261,8 +267,10 @@ export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnaps
       postType: cell.post.postType ?? "post",
       caption: typeof cell.post.caption === "string" ? cell.post.caption : undefined,
       mediaType: cell.post.mediaType === "image" || cell.post.mediaType === "video" ? cell.post.mediaType : undefined,
-      videoUrl: typeof cell.post.videoUrl === "string" ? cell.post.videoUrl : undefined,
+      videoUrl,
       coverImageUrl: typeof cell.post.coverImageUrl === "string" ? cell.post.coverImageUrl : undefined,
-    })),
+      externalUrl: fallbackUrl,
+    };
+    }),
   };
 }

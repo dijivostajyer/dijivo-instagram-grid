@@ -77,6 +77,8 @@ export interface Post {
   videoUrl?: string;
   /** Reel kapak görseli URL'si (video yerine grid'de gösterilir). */
   coverImageUrl?: string;
+  /** Oynatılabilir video sağlanmadığında kullanılacak özgün Instagram bağlantısı. */
+  externalUrl?: string;
 }
 
 /** Instagram'da halihazırda yayında olan gönderi */
