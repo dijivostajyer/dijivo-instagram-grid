@@ -27,7 +27,10 @@ export default async function SharePage({
       </main>
     );
   } catch (error) {
-    console.error("[share] Snapshot okunamadı:", error);
+    const step = "get_snapshot";
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const errorMessage = error instanceof Error ? error.message : "Bilinmeyen hata";
+    console.error("[share-api]", { step, errorName, error: errorMessage });
     return <UnavailableShare />;
   }
 }

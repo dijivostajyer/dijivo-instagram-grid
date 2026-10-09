@@ -25,7 +25,10 @@ export async function DELETE(
     await getShareStore().revoke(token);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error("[share] Snapshot kaldırılamadı:", error);
+    const step = "revoke_snapshot";
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const errorMessage = error instanceof Error ? error.message : "Bilinmeyen hata";
+    console.error("[share-api]", { step, errorName, error: errorMessage });
     return NextResponse.json({ error: "Paylaşım bağlantısı kaldırılamadı." }, { status: 500 });
   }
 }

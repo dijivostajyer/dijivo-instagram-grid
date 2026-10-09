@@ -357,10 +357,6 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   }
 
   async function handleReset() {
-    const confirmed = window.confirm(
-      "Tüm markalar, aylık planlar, görseller ve yüklenen dosyalar kalıcı olarak silinecek ve ilk açılış ekranına (marka oluşturma) dönülecek. Devam edilsin mi?",
-    );
-    if (!confirmed) return;
     await resetToDefaults();
     setPinError(null);
     setPlannedError(null);
@@ -816,7 +812,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
             ) : null}
 
             {view === "settings" ? (
-              <SettingsPage projectCount={projects.length} onReset={() => void handleReset()} />
+              <SettingsPage projectCount={projects.length} onReset={handleReset} />
             ) : null}
           </main>
         </div>

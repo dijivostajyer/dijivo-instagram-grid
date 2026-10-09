@@ -46,6 +46,7 @@ import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 import { pullWorkspace, pushWorkspace, reconcileWorkspaceState } from "../lib/workspace-store";
 import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "../lib/workspace-media-store";
+import { withBasePath } from "../lib/base-path";
 
 /**
  * §16/§2: tip tanımıları saf geçiş modülünde (brand-ops) yaşar;
@@ -486,6 +487,30 @@ export function usePersistedGrid(): PersistedGrid {
   );
 
   const resetToDefaults = useCallback(async () => {
+    // Sunucu-side temizliği çağır
+    const db = getSupabaseBrowserClient();
+    const { data: { session } } = await db?.auth.getSession() ?? { data: { session: null } };
+    if (session) {
+      try {
+        const response = await fetch(withBasePath("/api/workspace/clear-all"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.access_token}`,
+          },
+        });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: "Sunucu temizleme başarısız" }));
+          console.error("[resetToDefaults] Sunucu temizleme hatası:", error);
+          throw new Error(error.error || "Sunucu temizleme başarısız");
+        }
+      } catch (error) {
+        console.error("[resetToDefaults] Sunucu temizleme başarısız:", error);
+        throw error;
+      }
+    }
+
+    // Yerel temizleme
     clearPersistedState(getBrowserStorage());
     await clearStoredImages();
     await clearStoredVideos();
