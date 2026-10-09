@@ -29,27 +29,71 @@ export default function AuthGate() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [canBootstrap, setCanBootstrap] = useState<boolean | null>(null);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [showBootstrapForm, setShowBootstrapForm] = useState(false);
   const supabase = getSupabaseBrowserClient();
 
   useEffect(() => {
-    if (!supabase) { setSession(null); return; }
-    void supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => subscription.subscription.unsubscribe();
+    if (!supabase) {
+      setSession(null);
+      return;
+    }
+    let cancelled = false;
+    const verifySession = async (candidate?: Session | null) => {
+      try {
+        const sessionResult = candidate === undefined
+          ? await supabase.auth.getSession()
+          : { data: { session: candidate } };
+        const current = sessionResult.data.session;
+        if (!current) {
+          if (!cancelled) setSession(null);
+          return;
+        }
+        // `getSession` yerel depodaki eski token'ı döndürebilir. Uygulama
+        // yalnız `/auth/v1/user` doğrulamasından geçen session ile açılır.
+        const { data, error } = await supabase.auth.getUser();
+        if (error || !data.user) {
+          if (!cancelled) setSession(null);
+          return;
+        }
+        if (!cancelled) setSession({ ...current, user: data.user });
+      } catch {
+        // Ağ/Auth hatasında içerik erişimi verme; bootstrap kontrolüne düş.
+        if (!cancelled) setSession(null);
+      }
+    };
+    void verifySession();
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, next) => {
+      void verifySession(next);
+    });
+    return () => {
+      cancelled = true;
+      subscription.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   useEffect(() => {
     if (session !== null) return;
     let cancelled = false;
+    setCanBootstrap(null);
+    setBootstrapError(null);
     void fetch(withBasePath("/api/auth/bootstrap"), { cache: "no-store" })
-      .then(async (response) => response.ok ? response.json() : { canBootstrap: false })
-      .then((data: { canBootstrap?: boolean }) => {
-        if (!cancelled) setCanBootstrap(data.canBootstrap === true);
+      .then(async (response) => {
+        const data: unknown = await response.json().catch(() => null);
+        if (!response.ok || typeof (data as { canBootstrap?: unknown } | null)?.canBootstrap !== "boolean") {
+          throw new Error("Bootstrap durumu doğrulanamadı.");
+        }
+        return data as { canBootstrap: boolean };
       })
-      .catch(() => { if (!cancelled) setCanBootstrap(false); });
+      .then((data) => {
+        if (!cancelled) setCanBootstrap(data.canBootstrap);
+      })
+      .catch(() => {
+        if (!cancelled) setBootstrapError("Giriş durumu doğrulanamadı. Lütfen tekrar deneyin.");
+      });
     return () => { cancelled = true; };
-  }, [session]);
+  }, [session, bootstrapAttempt]);
 
   if (session === undefined) return <main className="min-h-screen grid place-items-center">Yükleniyor…</main>;
   const handleLogout = async () => {
@@ -101,6 +145,22 @@ export default function AuthGate() {
 
   if (session) {
     return <GridManager userEmail={session.user.email ?? ""} onLogout={() => void handleLogout()} />;
+  }
+
+  if (bootstrapError) {
+    return <main className="min-h-screen grid place-items-center bg-slate-50 p-6">
+      <section className="w-full max-w-sm rounded-2xl bg-white p-7 text-center shadow-sm">
+        <AuthBrand title="Dijivo Workspace" />
+        <p role="alert" className="mt-4 text-sm text-rose-700">{bootstrapError}</p>
+        <button
+          type="button"
+          onClick={() => setBootstrapAttempt((attempt) => attempt + 1)}
+          className="mt-5 w-full rounded bg-slate-900 p-2 text-white"
+        >
+          Yeniden dene
+        </button>
+      </section>
+    </main>;
   }
 
   // Kullanıcı varsa - normal giriş formu
