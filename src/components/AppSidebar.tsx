@@ -12,6 +12,8 @@ import {
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
 
+import { withBasePath } from "@/lib/base-path";
+
 /** Uygulama içi görünüm kimliği. Yeni route açılmaz; navigasyon state'tedir. */
 export type AppView =
   | "brands"
@@ -66,7 +68,7 @@ export default function AppSidebar({
   return (
     <div className="flex h-full flex-col bg-neutral-900 text-neutral-300">
       <button type="button" onClick={() => onNavigate("brands")} className="flex items-center gap-3 border-b border-white/10 px-5 py-4 text-left hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-400" aria-label="Marka ve proje seçimine dön">
-        <img src="/brand/dijivo-logo.png" alt="Dijivo" className="h-8 w-auto max-w-28 object-contain sm:h-9 sm:max-w-32" />
+        <img src={withBasePath("/brand/dijivo-logo.png")} alt="Dijivo" className="h-8 w-auto max-w-28 object-contain sm:h-9 sm:max-w-32" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-white">Dijivo Grid</p>
           <p className="truncate text-xs text-neutral-400">Instagram Grid Planner</p>
