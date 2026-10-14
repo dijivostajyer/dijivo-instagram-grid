@@ -152,12 +152,24 @@ export default function FeedbackCenter({
   brands,
   projects,
   onOpenTarget,
+  focus,
+  onReadChange,
+  reloadKey = 0,
 }: {
   source: FeedbackCenterSource;
   brands: Brand[];
   /** Tüm markaların aylık planları (ay etiketi ve "Projeye Git" için). */
   projects: GridProject[];
   onOpenTarget: (target: FeedbackTargetLink) => void;
+  /**
+   * Bildirimden gelinince açılacak kayıt. Yalnız bu kayıt okundu yapılır
+   * (aynı içeriğin diğer okunmamışları ve başka kayıtlar etkilenmez).
+   */
+  focus?: { id: string; nonce: number } | null;
+  /** Okunmamış sayısı/okundu kayıtları değişince (bildirim rozeti için). */
+  onReadChange?: (result: { ids: string[]; unreadCount: number }) => void;
+  /** Dışarıda toplu okundu yapılınca listeyi tazelemek için. */
+  reloadKey?: number;
 }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
@@ -174,6 +186,14 @@ export default function FeedbackCenter({
   const [detailError, setDetailError] = useState<string | null>(null);
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const requestRef = useRef(0);
+  const onReadChangeRef = useRef(onReadChange);
+  useEffect(() => {
+    onReadChangeRef.current = onReadChange;
+  }, [onReadChange]);
+  const syncUnread = useCallback((unread: number, ids: string[] = []) => {
+    setUnreadCount(unread);
+    onReadChangeRef.current?.({ ids, unreadCount: unread });
+  }, []);
 
   const brandById = useMemo(() => new Map(brands.map((brand) => [brand.id, brand])), [brands]);
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
@@ -230,18 +250,18 @@ export default function FeedbackCenter({
       setItems(result.items);
       setHasMore(result.hasMore);
       setNextOffset(result.nextOffset);
-      setUnreadCount(result.unreadCount);
+      syncUnread(result.unreadCount);
     } catch (caught) {
       if (id !== requestRef.current) return;
       setError(caught instanceof Error ? caught.message : "Geri dönüşler yüklenemedi.");
     } finally {
       if (id === requestRef.current) setLoading(false);
     }
-  }, [query, source]);
+  }, [query, source, syncUnread]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, reloadKey]);
 
   async function loadMore() {
     setLoadingMore(true);
@@ -253,7 +273,7 @@ export default function FeedbackCenter({
       });
       setHasMore(result.hasMore);
       setNextOffset(result.nextOffset);
-      setUnreadCount(result.unreadCount);
+      syncUnread(result.unreadCount);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Geri dönüşler yüklenemedi.");
     } finally {
@@ -270,26 +290,37 @@ export default function FeedbackCenter({
     });
   }, []);
 
-  const openDetail = useCallback(async (id: string) => {
+  /**
+   * Detayı açar. "target" (listeden): bu içeriğin görünen okunmamışları
+   * okundu olur (Faz 4). "self" (bildirimden): yalnız açılan kayıt.
+   */
+  const openDetail = useCallback(async (id: string, scope: "target" | "self" = "target") => {
     setSelectedId(id);
     setDetail(null);
     setDetailError(null);
     try {
       const loaded = await source.detail(id);
       setDetail(loaded);
-      // Liste açılınca değil, detay görülünce okundu: bu hedefin görünen
-      // okunmamış kayıtları.
-      const unread = loaded.history.filter((entry) => !entry.readAt).map((entry) => entry.id);
+      // Liste açılınca değil, detay görülünce okundu.
+      const unread = scope === "self"
+        ? (loaded.item.readAt ? [] : [loaded.item.id])
+        : loaded.history.filter((entry) => !entry.readAt).map((entry) => entry.id);
       if (unread.length) {
         const result = await source.markRead(unread);
         const readAt = new Date().toISOString();
         for (const readId of result.ids) applyRecord({ id: readId, readAt });
-        setUnreadCount(result.unreadCount);
+        syncUnread(result.unreadCount, result.ids);
       }
     } catch (caught) {
       setDetailError(caught instanceof Error ? caught.message : "Geri dönüş yüklenemedi.");
     }
-  }, [applyRecord, source]);
+  }, [applyRecord, source, syncUnread]);
+
+  // Bildirimden gelinen kayıt: her yeni tıklamada (nonce) yalnız o açılır.
+  useEffect(() => {
+    if (focus) void openDetail(focus.id, "self");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.id, focus?.nonce]);
 
   async function changeWorkflow(status: WorkflowStatus) {
     if (!detail) return;

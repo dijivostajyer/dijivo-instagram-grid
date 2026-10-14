@@ -10,6 +10,8 @@ import type { FeedbackCenterSource } from "@/lib/feedback-center-client";
 import {
   InMemoryFeedbackCenterDriver,
   getFeedbackCenterDetail,
+  getNotificationSummary,
+  handleMarkAllRead,
   handleMarkRead,
   handleWorkflowUpdate,
   listFeedbackCenter,
@@ -63,6 +65,8 @@ function makeSource(records: Array<FeedbackCenterRecord & { userId: string }>) {
     detail: async (id) => (await getFeedbackCenterDetail(ME, id, driver, NOW))!,
     setWorkflow: async (id, status) => (await handleWorkflowUpdate(ME, id, { workflowStatus: status }, driver)).body.record as FeedbackCenterRecord,
     markRead: async (ids) => (await handleMarkRead(ME, { ids }, driver)).body as { ids: string[]; unreadCount: number },
+    notifications: () => getNotificationSummary(ME, null, driver),
+    markAllRead: async () => (await handleMarkAllRead(ME, driver)).body as { updated: number; unreadCount: number },
   };
   return source;
 }
@@ -260,5 +264,43 @@ describe("Detay, geçmiş ve iş akışı", () => {
     fireEvent.click(screen.getByRole("button", { name: "Daha fazla göster" }));
     await waitFor(() => expect(cards()).toHaveLength(55));
     expect(screen.queryByRole("button", { name: "Daha fazla göster" })).toBeNull();
+  });
+});
+
+describe("Faz 5: bildirimden gelen odak", () => {
+  it("K/L/M. bildirim kaydının detayı açılır; yalnız o kayıt okundu olur, diğer okunmamışlar aynı kalır", async () => {
+    const olderSameTarget = rec({ action: "approved" });
+    const clicked = rec({ action: "revision_requested", message: "Fiyatı ekleyelim." });
+    const otherTarget = rec({ targetType: "reel", targetId: "reel-1", action: "revision_requested", message: "Müzik" });
+    onOpenTarget = vi.fn();
+    const onReadChange = vi.fn();
+    render(
+      <FeedbackCenter
+        source={makeSource([olderSameTarget, clicked, otherTarget])}
+        brands={brands}
+        projects={projects}
+        onOpenTarget={onOpenTarget}
+        focus={{ id: clicked.id, nonce: 1 }}
+        onReadChange={onReadChange}
+      />,
+    );
+    const detail = await screen.findByTestId("feedback-detail");
+    await waitFor(() => expect(within(detail).getByTestId("feedback-message").textContent).toBe("Fiyatı ekleyelim."));
+    await waitFor(() => expect(driver.records.find((record) => record.id === clicked.id)?.readAt).not.toBeNull());
+    expect(driver.records.find((record) => record.id === olderSameTarget.id)?.readAt).toBeNull();
+    expect(driver.records.find((record) => record.id === otherTarget.id)?.readAt).toBeNull();
+    await waitFor(() => expect(onReadChange).toHaveBeenCalledWith({ ids: [clicked.id], unreadCount: 2 }));
+    await waitFor(() => expect(screen.getByTestId("unread-count").textContent).toBe("2 okunmamış"));
+  });
+
+  it("reloadKey değişince liste tazelenir (ör. tümünü okundu yap sonrası)", async () => {
+    const records = [rec({}), rec({})];
+    const { rerender } = render(<FeedbackCenter source={makeSource(records)} brands={brands} projects={projects} onOpenTarget={vi.fn()} reloadKey={0} />);
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    expect(within(cards()[0]).getByLabelText("Okunmamış")).toBeTruthy();
+    await driver.markAllRead("00000000-0000-4000-8000-000000000001");
+    rerender(<FeedbackCenter source={source} brands={brands} projects={projects} onOpenTarget={vi.fn()} reloadKey={1} />);
+    await waitFor(() => expect(within(cards()[0]).queryByLabelText("Okunmamış")).toBeNull());
+    expect(screen.getByTestId("unread-count").textContent).toBe("0 okunmamış");
   });
 });

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Bars3Icon, CheckIcon, PlusIcon } from "@heroicons/react/16/solid";
 
 import type { GridProject } from "@/lib/storage";
@@ -24,6 +25,7 @@ export default function AppTopbar({
   onOpenSidebar,
   userEmail,
   onLogout,
+  notifications,
 }: {
   view: AppView;
   brands: Brand[];
@@ -36,6 +38,8 @@ export default function AppTopbar({
   onOpenSidebar: () => void;
   userEmail: string;
   onLogout: () => void;
+  /** Bildirim zili (mobilde de başlık satırında görünür). */
+  notifications?: ReactNode;
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -54,6 +58,8 @@ export default function AppTopbar({
             {VIEW_TITLES[view]}
           </h1>
         </div>
+
+        {notifications}
 
         <div className="hidden items-center gap-1.5 text-sm text-neutral-500 md:flex">
           <CheckIcon className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />

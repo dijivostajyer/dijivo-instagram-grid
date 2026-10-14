@@ -14,6 +14,12 @@ import {
   type FeedbackWorkflowEvent,
   type WorkflowStatus,
 } from "./feedback-center";
+import {
+  MAX_NOTIFICATION_LIMIT,
+  NOTIFICATION_LIMIT,
+  toNotificationItem,
+  type FeedbackNotificationSummary,
+} from "./feedback-notifications";
 
 /** Önizleme için gereken snapshot satırı (medya imzalanmamış). */
 export interface FeedbackSnapshotRow {
@@ -42,6 +48,10 @@ export interface FeedbackCenterDriver {
   setWorkflow(userId: string, id: string, status: WorkflowStatus): Promise<FeedbackCenterRecord | null>;
   /** Okunmamışları okundu yapar (zaten okunmuşların tarihi değişmez). */
   markRead(userId: string, ids: string[]): Promise<string[]>;
+  /** Bildirim listesi: en yeni kayıtlar (medya yok), en yeni üstte. */
+  recent(userId: string, limit: number): Promise<FeedbackCenterRecord[]>;
+  /** Kullanıcının tüm okunmamışlarını okundu yapar; etkilenen sayıyı döner. */
+  markAllRead(userId: string): Promise<number>;
 }
 
 type Result = { status: number; body: Record<string, unknown> };
@@ -133,6 +143,23 @@ export async function handleMarkRead(userId: string, body: unknown, driver: Feed
   return { status: 200, body: { ids: updated, unreadCount: await driver.countUnread(userId) } };
 }
 
+/**
+ * Bildirim özeti (Faz 5): okunmamış sayısı + son birkaç kayıt. Medya
+ * imzalanmaz ve snapshot okunmaz; her yoklamada hafif kalır.
+ */
+export async function getNotificationSummary(userId: string, limitParam: string | null, driver: FeedbackCenterDriver): Promise<FeedbackNotificationSummary> {
+  const parsed = Number(limitParam ?? NOTIFICATION_LIMIT);
+  const limit = Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, MAX_NOTIFICATION_LIMIT) : NOTIFICATION_LIMIT;
+  const [count, records] = await Promise.all([driver.countUnread(userId), driver.recent(userId, limit)]);
+  return { count, items: records.map(toNotificationItem) };
+}
+
+/** Açık kullanıcı eylemi: yalnız kendi okunmamışları. */
+export async function handleMarkAllRead(userId: string, driver: FeedbackCenterDriver): Promise<Result> {
+  const updated = await driver.markAllRead(userId);
+  return { status: 200, body: { updated, unreadCount: await driver.countUnread(userId) } };
+}
+
 /** Bellek içi sürücü: testler ve geliştirme fixture'ı için. */
 export class InMemoryFeedbackCenterDriver implements FeedbackCenterDriver {
   readonly events_: Array<FeedbackWorkflowEvent & { userId: string }> = [];
@@ -196,6 +223,22 @@ export class InMemoryFeedbackCenterDriver implements FeedbackCenterDriver {
     record.readAt ??= at;
     this.events_.push({ id: crypto.randomUUID(), feedbackId: id, userId, status, createdAt: at });
     return this.strip(record);
+  }
+
+  async recent(userId: string, limit: number) {
+    return sortFeedbackRecords(this.own(userId), "desc").slice(0, limit).map((record) => this.strip(record));
+  }
+
+  async markAllRead(userId: string) {
+    const at = this.now().toISOString();
+    let updated = 0;
+    for (const record of this.own(userId)) {
+      if (!record.readAt) {
+        record.readAt = at;
+        updated += 1;
+      }
+    }
+    return updated;
   }
 
   async markRead(userId: string, ids: string[]) {

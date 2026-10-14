@@ -9,6 +9,7 @@ import {
   type FeedbackListResult,
   type WorkflowStatus,
 } from "./feedback-center";
+import type { FeedbackNotificationSummary } from "./feedback-notifications";
 import { getSupabaseBrowserClient } from "./supabase-browser";
 
 /** Geri Dönüşler ekranının veri kaynağı (HTTP veya test/fixture). */
@@ -17,6 +18,9 @@ export interface FeedbackCenterSource {
   detail(id: string): Promise<FeedbackDetail>;
   setWorkflow(id: string, status: WorkflowStatus): Promise<FeedbackCenterRecord>;
   markRead(ids: string[]): Promise<{ ids: string[]; unreadCount: number }>;
+  /** Bildirimler (Faz 5): hafif özet, medya yok. */
+  notifications(): Promise<FeedbackNotificationSummary>;
+  markAllRead(): Promise<{ updated: number; unreadCount: number }>;
 }
 
 async function authHeaders(): Promise<HeadersInit> {
@@ -53,5 +57,7 @@ export function createHttpFeedbackCenterSource(): FeedbackCenterSource {
     setWorkflow: async (id, status) =>
       (await request<{ record: FeedbackCenterRecord }>(`/api/feedback/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ workflowStatus: status }) })).record,
     markRead: (ids) => request<{ ids: string[]; unreadCount: number }>("/api/feedback/read", { method: "POST", body: JSON.stringify({ ids }) }),
+    notifications: () => request<FeedbackNotificationSummary>("/api/feedback/unread"),
+    markAllRead: () => request<{ updated: number; unreadCount: number }>("/api/feedback/read-all", { method: "POST", body: "{}" }),
   };
 }

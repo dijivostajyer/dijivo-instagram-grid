@@ -36,6 +36,8 @@ import type {
   CalendarItem,
 } from "@/lib/calendar-types";
 import { useCalendarStore } from "@/hooks/use-calendar-store";
+import { useFeedbackNotifications } from "@/hooks/use-feedback-notifications";
+import NotificationBell from "@/components/NotificationBell";
 import { resolveCalendarLink } from "@/lib/calendar-link";
 import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
@@ -452,6 +454,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
 
   function navigate(next: AppView) {
     setView(next);
+    setFeedbackFocus(null);
     setSidebarOpen(false);
   }
 
@@ -487,6 +490,23 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   }
 
   const feedbackSource = useMemo(() => createHttpFeedbackCenterSource(), []);
+  // Faz 5: okunmamış geri bildirim rozeti ve son bildirimler (60 sn yoklama,
+  // sekme gizliyken durur). Kaynak share_feedback.read_at.
+  const notifications = useFeedbackNotifications(feedbackSource, { enabled: ready && brands.length > 0 });
+  const [feedbackFocus, setFeedbackFocus] = useState<{ id: string; nonce: number } | null>(null);
+  const [feedbackReloadKey, setFeedbackReloadKey] = useState(0);
+
+  /** Bildirime tıklama: Geri Dönüşler açılır, yalnız o kayıt okundu olur. */
+  function openNotification(id: string) {
+    setFeedbackFocus({ id, nonce: Date.now() });
+    setView("feedback");
+    setSidebarOpen(false);
+  }
+
+  async function markAllNotificationsRead() {
+    await notifications.markAllRead();
+    setFeedbackReloadKey((key) => key + 1);
+  }
 
   // Geri Dönüşler → "Projeye Git": ilgili markanın aylık planını Grid
   // Planner'da açar; Post/Reel hâlâ plandaysa modalı, Story için Story
@@ -529,7 +549,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     <div className="min-h-screen bg-[#f5f6f8] text-neutral-900">
       <div className="lg:flex">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 lg:block">
-          <AppSidebar view={view} onNavigate={navigate} />
+          <AppSidebar view={view} onNavigate={navigate} badges={{ feedback: notifications.count }} />
         </aside>
 
         <div className="min-w-0 flex-1">
@@ -551,6 +571,19 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
         onOpenSidebar={() => setSidebarOpen(true)}
         userEmail={userEmail}
         onLogout={onLogout}
+        notifications={
+          <NotificationBell
+            count={notifications.count}
+            items={notifications.items}
+            loaded={notifications.loaded}
+            error={notifications.error}
+            brands={brands}
+            projects={allProjects}
+            onOpenItem={openNotification}
+            onViewAll={() => navigate("feedback")}
+            onMarkAllRead={markAllNotificationsRead}
+          />
+        }
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
@@ -860,6 +893,9 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                 brands={brands}
                 projects={allProjects}
                 onOpenTarget={handleOpenFeedbackTarget}
+                focus={feedbackFocus}
+                onReadChange={notifications.applyRead}
+                reloadKey={feedbackReloadKey}
               />
             ) : null}
 
@@ -1022,7 +1058,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
             >
               <XMarkIcon className="size-4" aria-hidden="true" />
             </button>
-            <AppSidebar view={view} onNavigate={navigate} />
+            <AppSidebar view={view} onNavigate={navigate} badges={{ feedback: notifications.count }} />
           </div>
         </div>
       ) : null}

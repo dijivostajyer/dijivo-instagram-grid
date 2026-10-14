@@ -14,6 +14,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import { withBasePath } from "@/lib/base-path";
+import { formatBadgeCount } from "@/lib/feedback-notifications";
 
 /** Uygulama içi görünüm kimliği. Yeni route açılmaz; navigasyon state'tedir. */
 export type AppView =
@@ -65,9 +66,12 @@ export const VIEW_TITLES: Record<AppView, string> = {
 export default function AppSidebar({
   view,
   onNavigate,
+  badges,
 }: {
   view: AppView;
   onNavigate: (view: AppView) => void;
+  /** Menü rozetleri (ör. okunmamış geri dönüş sayısı); 0 ise gösterilmez. */
+  badges?: Partial<Record<AppView, number>>;
 }) {
   return (
     <div className="flex h-full flex-col bg-neutral-900 text-neutral-300">
@@ -83,6 +87,7 @@ export default function AppSidebar({
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = item.view === view;
+          const badge = formatBadgeCount(badges?.[item.view] ?? 0);
           return (
             <button
               key={item.view}
@@ -97,6 +102,12 @@ export default function AppSidebar({
             >
               <Icon className="size-4 shrink-0" aria-hidden="true" />
               <span className="truncate">{item.label}</span>
+              {badge ? (
+                <span data-testid={`nav-badge-${item.view}`} className="ml-auto shrink-0 rounded-full bg-sky-500 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white">
+                  {badge}
+                  <span className="sr-only"> okunmamış</span>
+                </span>
+              ) : null}
             </button>
           );
         })}

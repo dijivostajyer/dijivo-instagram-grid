@@ -166,6 +166,26 @@ export class SupabaseFeedbackCenterDriver implements FeedbackCenterDriver {
     return fromRow(data as Row);
   }
 
+  async recent(userId: string, limit: number) {
+    const { data, error } = await this.client
+      .from("share_feedback").select(COLUMNS)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false }).order("id", { ascending: false })
+      .limit(limit);
+    if (error) fail("recent", error);
+    return ((data ?? []) as Row[]).map(fromRow);
+  }
+
+  async markAllRead(userId: string) {
+    // Yalnız kullanıcının okunmamışları; created_at ve müşteri alanları değişmez.
+    const { data, error } = await this.client
+      .from("share_feedback").update({ read_at: new Date().toISOString() })
+      .eq("user_id", userId).is("read_at", null)
+      .select("id");
+    if (error) fail("mark_all_read", error);
+    return (data ?? []).length;
+  }
+
   async markRead(userId: string, ids: string[]) {
     const valid = ids.filter((id) => /^[0-9a-f-]{36}$/i.test(id));
     if (!valid.length) return [];
