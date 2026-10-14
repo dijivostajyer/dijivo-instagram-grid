@@ -178,7 +178,7 @@ export default function PostModal({
   // Caption değiştiğinde focus'u koru (focus kaybı bug fix)
   useEffect(() => {
     if (document.activeElement === captionRef.current) {
-      return;
+      captionRef.current?.focus();
     }
   }, [caption]);
 

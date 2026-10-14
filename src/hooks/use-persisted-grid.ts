@@ -556,7 +556,7 @@ export function usePersistedGrid(): PersistedGrid {
     const db = getSupabaseBrowserClient();
     const { data: userData } = await db?.auth.getUser() ?? { data: { user: null } };
     if (!db || !userData.user) throw new Error("Story silmek için giriş yapın.");
-    const { error } = await db.from("workspace_stories").delete().eq("id", storyId).eq("user_id", userData.user.id);
+    const { error } = await db.from("workspace_stories").delete().eq("id", storyId).eq("user_id", userData.user.id).eq("project_id", currentProject.id);
     if (error) throw new Error(`Story silinemedi: ${error.message}`);
     if (isWorkspaceMediaRef(story.mediaUrl)) {
       const { error: mediaError } = await db.storage.from("workspace-media").remove([workspaceMediaPath(story.mediaUrl)]);
