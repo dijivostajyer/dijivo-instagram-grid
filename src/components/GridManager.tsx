@@ -21,6 +21,7 @@ import PlannedPostSorter from "@/components/PlannedPostSorter";
 import PlannedUpload from "@/components/PlannedUpload";
 import PostModal from "@/components/PostModal";
 import SettingsPage from "@/components/SettingsPage";
+import StoryManager from "@/components/StoryManager";
 import ShareWorkspace from "@/components/ShareWorkspace";
 import { useShareController } from "@/components/SharePanel";
 import {
@@ -81,6 +82,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     persistVideoUpload,
     resetToDefaults,
     deleteBrand,
+    addStory,
     deleteStory,
     projects,
     allProjects,
@@ -92,7 +94,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   } = usePersistedGrid();
   const [pinError, setPinError] = useState<string | null>(null);
   const [plannedError, setPlannedError] = useState<string | null>(null);
-  const [mediaTab, setMediaTab] = useState<"existing" | "planned">("existing");
+  const [mediaTab, setMediaTab] = useState<"existing" | "planned" | "stories">("existing");
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [view, setView] = useState<AppView>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -643,6 +645,18 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     >
                       Planlanan <span className="text-neutral-400">{plannedPosts.length}</span>
                     </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mediaTab === "stories"}
+                      onClick={() => {
+                        setMediaTab("stories");
+                        handleExitSelectionMode();
+                      }}
+                      className={`-mb-px border-b-2 px-3 py-2 font-medium ${mediaTab === "stories" ? "border-sky-700 text-neutral-900" : "border-transparent text-neutral-500 hover:text-neutral-900"}`}
+                    >
+                      Story <span className="text-neutral-400">{activeProject?.stories?.length ?? 0}</span>
+                    </button>
                   </div>
                   {mediaTab === "existing" ? (
                     <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="İçerik türü filtresi">
@@ -705,6 +719,13 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                       </div>
                     ) : null}
                     </>
+                  ) : mediaTab === "stories" ? (
+                    <StoryManager
+                      stories={activeProject?.stories}
+                      projectLabel={activeProject ? monthLabel(activeProject.month, activeProject.year) : null}
+                      onAdd={addStory}
+                      onDelete={deleteStory}
+                    />
                   ) : (
                     <section>
                       <PlannedUpload onUpload={handlePlannedUpload} />
@@ -768,7 +789,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     stories={activeProject?.stories}
                   />
                   <p className="mt-3 text-sm text-neutral-500">
-                    Görseller Instagram profilindeki gibi merkezden 1:1 kırpılır ({GRID_COLUMNS} sütun).
+                    Görseller merkezden kırpılır: Post 3:4, Reel 2:3 ({GRID_COLUMNS} sütun).
                   </p>
                 </section>
               </div>

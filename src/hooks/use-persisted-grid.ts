@@ -46,7 +46,21 @@ import {
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 import { pullWorkspace, pushWorkspace, reconcileWorkspaceState } from "../lib/workspace-store";
-import { isWorkspaceMediaRef, resolveWorkspaceMedia, workspaceMediaPath } from "../lib/workspace-media-store";
+import {
+  duplicateWorkspaceMedia,
+  isWorkspaceMediaRef,
+  resolveWorkspaceMedia,
+  toWorkspaceMediaRef,
+  uploadWorkspaceMedia,
+  workspaceMediaPath,
+} from "../lib/workspace-media-store";
+import {
+  addStoryToProject,
+  createStoryId,
+  isStoryMediaReferenced,
+  removeStoryFromProject,
+  replaceStoryMedia,
+} from "../lib/story-ops";
 import { withBasePath } from "../lib/base-path";
 
 /**
@@ -211,6 +225,11 @@ export interface PersistedGrid {
   /** Kalıcı veriyi siler ve temiz workspace'a (onboarding) döner. */
   resetToDefaults: () => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
+  /**
+   * Aktif aylık plana Story ekler. Medya önce workspace-media'ya yüklenir;
+   * blob URL kalıcı veri olarak saklanmaz.
+   */
+  addStory: (input: { url: string; mediaType: "image" | "video" }) => Promise<void>;
   /** Sadece seçilen Story kaydını ve ona ait workspace medyasını siler (ay bazlı). */
   deleteStory: (storyId: string) => Promise<void>;
   /** Aktif markaya ait projeler (sıkı marka izolasyonu, §5). */
@@ -549,6 +568,34 @@ export function usePersistedGrid(): PersistedGrid {
     commit(next);
   }, [commit]);
 
+  const storyMediaRef = useCallback(
+    (value: string) => toWorkspaceMediaRef(value, refByObjectUrl.current),
+    [],
+  );
+
+  const addStory = useCallback(async (input: { url: string; mediaType: "image" | "video" }) => {
+    // Story eklendiği anki aya aittir; yükleme sürerken ay değişse bile
+    // hedef proje sabit kalır.
+    const project = (stateRef.current.projects ?? []).find((item) => item.id === stateRef.current.activeProjectId);
+    try {
+      if (!project) throw new Error("Story eklemek için önce bir aylık plan seçin.");
+      const brandId = project.brandId ?? project.brand.id;
+      const ref = await uploadWorkspaceMedia(input.url, `${brandId}/story`);
+      const signedUrl = await resolveWorkspaceMedia(ref);
+      refByObjectUrl.current.set(signedUrl, ref);
+      const next = addStoryToProject(stateRef.current, project.id, {
+        id: createStoryId(),
+        mediaType: input.mediaType,
+        mediaUrl: signedUrl,
+        createdAt: new Date().toISOString(),
+      });
+      if (!next) throw new Error("Story eklenecek aylık plan bulunamadı.");
+      commit(next);
+    } finally {
+      if (input.url.startsWith("blob:")) URL.revokeObjectURL(input.url);
+    }
+  }, [commit]);
+
   const deleteStory = useCallback(async (storyId: string) => {
     const currentProject = (stateRef.current.projects ?? []).find((project) => project.id === stateRef.current.activeProjectId);
     const story = currentProject?.stories?.find((item) => item.id === storyId);
@@ -558,29 +605,41 @@ export function usePersistedGrid(): PersistedGrid {
     if (!db || !userData.user) throw new Error("Story silmek için giriş yapın.");
     const { error } = await db.from("workspace_stories").delete().eq("id", storyId).eq("user_id", userData.user.id).eq("project_id", currentProject.id);
     if (error) throw new Error(`Story silinemedi: ${error.message}`);
-    if (isWorkspaceMediaRef(story.mediaUrl)) {
-      const { error: mediaError } = await db.storage.from("workspace-media").remove([workspaceMediaPath(story.mediaUrl)]);
+    const next = removeStoryFromProject(stateRef.current, currentProject.id, storyId);
+    if (!next) return;
+    commit(next);
+    // Storage nesnesi yalnız başka hiçbir Story (başka aylar dahil)
+    // kullanmıyorsa silinir; eski paylaşılan path'li kopyalar korunur.
+    const mediaRef = storyMediaRef(story.mediaUrl);
+    if (mediaRef && !isStoryMediaReferenced(next, mediaRef, storyMediaRef)) {
+      const { error: mediaError } = await db.storage.from("workspace-media").remove([workspaceMediaPath(mediaRef)]);
       if (mediaError) console.warn("[workspace] Story medyası silinemedi; kayıt silindi.", mediaError);
     }
-    const next = {
-      ...stateRef.current,
-      projects: (stateRef.current.projects ?? []).map((project) =>
-        project.id === currentProject.id
-          ? { ...project, stories: (project.stories ?? []).filter((item) => item.id !== storyId).map((item, index) => ({ ...item, sortOrder: index })), updatedAt: new Date().toISOString() }
-          : project,
-      ),
-    };
-    // Aktif proje güncellendiyse üst düzey state'i de güncelle
-    if (stateRef.current.activeProjectId === currentProject.id) {
-      const updatedProject = next.projects.find((p) => p.id === currentProject.id);
-      if (updatedProject) {
-        next.brand = updatedProject.brand;
-        next.existingPosts = updatedProject.existingPosts;
-        next.plannedPosts = updatedProject.plannedPosts;
+  }, [commit, storyMediaRef]);
+
+  /**
+   * "Önceki ayı kopyala" ile gelen Story'ler kaynakla aynı Storage
+   * nesnesini gösterir. Her kopya için ayrı nesne oluşturulur; böylece
+   * kaynak ayda Story silinmesi yeni ayın Story'sini bozmaz.
+   */
+  const detachCopiedStoryMedia = useCallback(async (projectId: string) => {
+    const project = (stateRef.current.projects ?? []).find((item) => item.id === projectId);
+    if (!project?.stories?.length) return;
+    const brandId = project.brandId ?? project.brand.id;
+    for (const story of project.stories) {
+      if (!storyMediaRef(story.mediaUrl)) continue;
+      try {
+        const ref = await duplicateWorkspaceMedia(story.mediaUrl, `${brandId}/story`);
+        const signedUrl = await resolveWorkspaceMedia(ref);
+        refByObjectUrl.current.set(signedUrl, ref);
+        const next = replaceStoryMedia(stateRef.current, projectId, story.id, signedUrl);
+        if (next) commit(next);
+      } catch (error) {
+        // Paylaşılan path silme sırasında referans kontrolüyle korunur.
+        console.warn("[workspace] Kopyalanan Story medyası ayrılamadı; ortak dosya korunuyor.", { storyId: story.id, error });
       }
     }
-    commit(next);
-  }, [commit]);
+  }, [commit, storyMediaRef]);
 
   const selectProject = useCallback(
     (id: string) => {
@@ -595,8 +654,9 @@ export function usePersistedGrid(): PersistedGrid {
     const result = createProjectState(stateRef.current, name, month, year, copyPrevious);
     if ("error" in result) return result.error;
     commit(result.state);
+    if (copyPrevious) void detachCopiedStoryMedia(result.projectId);
     return null;
-  }, [commit]);
+  }, [commit, detachCopiedStoryMedia]);
 
   const copyPostToProject = useCallback(
     (postId: string, targetProjectId: string, options: PostCopyOptions): string | null => {
@@ -636,6 +696,7 @@ export function usePersistedGrid(): PersistedGrid {
     persistVideoUpload,
     resetToDefaults,
     deleteBrand,
+    addStory,
     deleteStory,
     projects: (state.projects ?? []).filter(
       (project) =>

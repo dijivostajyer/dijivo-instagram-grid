@@ -1,10 +1,12 @@
 "use client";
 
+import { gridCellAspectClass, POST_CELL_ASPECT_CLASS } from "@/lib/grid-ratio";
 import type { GridResult } from "@/lib/types";
 
 /**
  * Salt-okunur mini grid önizlemesi: gerçek grid hücrelerinden ilk N'sini
- * gösterir. Grid algoritmasına dokunmaz; yalnızca sunumdur.
+ * gösterir. Hücre oranı ana grid ile aynı kaynaktan gelir (grid-ratio).
+ * Grid algoritmasına dokunmaz; yalnızca sunumdur.
  */
 export default function MiniGridPreview({
   cells,
@@ -36,7 +38,7 @@ export default function MiniGridPreview({
         {shown.map((cell) => (
           <div
             key={cell.post.id}
-            className="aspect-square overflow-hidden rounded-md bg-neutral-100 ring-1 ring-black/5"
+            className={`${gridCellAspectClass(cell.post.postType)} overflow-hidden rounded-md bg-neutral-100 ring-1 ring-black/5`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -50,7 +52,7 @@ export default function MiniGridPreview({
         {Array.from({ length: padCount }, (_, i) => (
           <span
             key={`pad-${i}`}
-            className="aspect-square rounded-md bg-slate-100 ring-1 ring-black/5"
+            className={`${POST_CELL_ASPECT_CLASS} rounded-md bg-slate-100 ring-1 ring-black/5`}
             aria-hidden="true"
           />
         ))}

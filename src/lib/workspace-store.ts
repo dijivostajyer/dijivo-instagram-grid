@@ -5,7 +5,7 @@ import type { User } from "@supabase/supabase-js";
 import { syncActiveProject } from "./brand-ops";
 import { getSupabaseBrowserClient } from "./supabase-browser";
 import type { GridProject, PersistedAppState } from "./storage";
-import type { Brand, ExistingPost, PlannedPost } from "./types";
+import type { Brand, ExistingPost, PlannedPost, Story } from "./types";
 import { isWorkspaceMediaRef, uploadWorkspaceMedia, workspaceMediaPath } from "./workspace-media-store";
 import { isInstagramPostUrl } from "./reel-media";
 
@@ -49,6 +49,9 @@ async function materializeMedia(state: PersistedAppState): Promise<PersistedAppS
   const brands = await Promise.all((state.brands ?? []).map(brand));
   const projects = await Promise.all((state.projects ?? []).map(async (project) => ({
     ...project, brand: await brand(project.brand), existingPosts: await Promise.all(project.existingPosts.map((item) => materializePost(item, project.brandId ?? project.brand.id))), plannedPosts: await Promise.all(project.plannedPosts.map((item) => materializePost(item, project.brandId ?? project.brand.id))),
+    // Hydration sonrası Story medyası imzalı URL'dir; DB'ye URL değil
+    // workspace-media referansı yazılmalı.
+    stories: await Promise.all((project.stories ?? []).map(async (story) => ({ ...story, mediaUrl: (await upload(story.mediaUrl, `${project.brandId ?? project.brand.id}/story`)) ?? story.mediaUrl }))),
   })));
   const activeBrand = brands.find((item) => item.id === state.activeBrandId) ?? state.brand;
   const activeProject = projects.find((item) => item.id === state.activeProjectId);
@@ -158,6 +161,24 @@ export async function pullWorkspace(user: User): Promise<PersistedAppState | nul
   return { version: 3, brands, activeBrandId, projects, activeProjectId, brand: brands.find((b) => b.id === activeBrandId) ?? brands[0], existingPosts: active?.existingPosts ?? [], plannedPosts: active?.plannedPosts ?? [] };
 }
 
+/**
+ * workspace_stories satırları. Her satır kendi projesinin `project_id`'si
+ * ile yazılır; projesiz veya Storage'a bağlanmamış (blob/URL) medya asla
+ * yazılmaz, böylece belirsiz veya kırık Story kaydı üretilmez.
+ */
+export function buildStoryRows(userId: string, projects: readonly GridProject[]) {
+  return projects.flatMap((project) => {
+    if (!project.id) return [];
+    return (project.stories ?? []).flatMap((story: Story) => {
+      if (!isWorkspaceMediaRef(story.mediaUrl)) {
+        console.warn("[workspace] Story medyası Storage'a bağlı değil; satır yazılmadı.", { storyId: story.id, projectId: project.id });
+        return [];
+      }
+      return [{ user_id: userId, id: story.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, media_type: story.mediaType, media_path: workspaceMediaPath(story.mediaUrl), created_at: story.createdAt, sort_order: story.sortOrder, expires_at: story.expiresAt ?? null }];
+    });
+  });
+}
+
 export async function pushWorkspace(user: User, input: PersistedAppState): Promise<PersistedAppState> {
   const db = getSupabaseBrowserClient(); if (!db) throw new Error("Supabase Auth yapılandırılmadı.");
   const state = await materializeMedia(input);
@@ -180,7 +201,7 @@ export async function pushWorkspace(user: User, input: PersistedAppState): Promi
   }
   const highlights = brands.flatMap((brand) => (brand.highlights ?? []).map((highlight) => ({ user_id: user.id, id: highlight.id, brand_id: brand.id, title: highlight.title, image_path: stored(highlight.imageUrl) })));
   if (highlights.length) { const { error } = await db.from("workspace_highlights").upsert(highlights, { onConflict: "id" }); if (error) throw new Error(`workspace_highlights yazılamadı: ${error.message}`); }
-  const stories = projects.flatMap((project) => (project.stories ?? []).map((story) => ({ user_id: user.id, id: story.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, media_type: story.mediaType, media_path: stored(story.mediaUrl), created_at: story.createdAt, sort_order: story.sortOrder, expires_at: story.expiresAt ?? null })));
+  const stories = buildStoryRows(user.id, projects);
   if (stories.length) { const { error } = await db.from("workspace_stories").upsert(stories, { onConflict: "id" }); if (error) throw new Error(`workspace_stories yazılamadı: ${error.message}`); }
   const { error } = await db.from("workspace_prefs").upsert({ user_id: user.id, active_brand_id: state.activeBrandId || null, active_project_id: state.activeProjectId || null }); if (error) throw new Error(`workspace_prefs yazılamadı: ${error.message}`);
   return syncActiveProject(state);

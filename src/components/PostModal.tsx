@@ -85,7 +85,6 @@ export default function PostModal({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const captionRef = useRef<HTMLTextAreaElement>(null);
   const [copyTarget, setCopyTarget] = useState("");
   const [copyOptions, setCopyOptions] = useState<PostCopyOptions>({
     caption: true,
@@ -159,28 +158,31 @@ export default function PostModal({
     }
   }
 
+  // Üst bileşen onClose'u her render'da yeni fonksiyon olarak verebilir
+  // (ör. caption yazarken). En güncel callback ref'te tutulur; böylece
+  // açılış odağı ve ESC dinleyicisi callback kimliğine bağlı kalmaz.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Açılış odağı yalnız modal mount olduğunda bir kez verilir. Daha önce
+  // [onClose] bağımlılığı her tuş vuruşunda odağı kapat butonuna taşıyordu.
   useEffect(() => {
     closeRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         stopVideo();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
+  }, []);
 
   const pinned = source === "mevcut" && (post as ExistingPost).pinned;
   const title = post.alt ?? "Görsel";
   const caption = post.caption ?? "";
-
-  // Caption değiştiğinde focus'u koru (focus kaybı bug fix)
-  useEffect(() => {
-    if (document.activeElement === captionRef.current) {
-      captionRef.current?.focus();
-    }
-  }, [caption]);
 
   function appendToCaption(text: string) {
     onCaptionChange(caption ? `${caption}\n\n${text}` : text);
@@ -498,7 +500,6 @@ export default function PostModal({
                 Caption
               </label>
               <textarea
-                ref={captionRef}
                 id="modal-caption"
                 value={caption}
                 onChange={(event) => onCaptionChange(event.target.value)}

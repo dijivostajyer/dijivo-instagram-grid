@@ -15,6 +15,7 @@ import {
 import StoryViewer from "./StoryViewer";
 
 import type { Brand, GridResult, Story } from "@/lib/types";
+import { gridCellAspectClass } from "@/lib/grid-ratio";
 import {
   useInstagramPreviewTheme,
   type IgPreviewTheme,
@@ -66,14 +67,13 @@ function GridCellView({
 
   const placeholderBg = dark ? "bg-neutral-900" : "bg-neutral-100";
   const ringTheme = dark ? "hover:ring-white/25" : "hover:ring-black/20";
-  const isReel = post.postType === "reel";
 
   return (
     <button
       type="button"
       onClick={() => onSelect?.(post.id)}
       aria-label={`${post.alt}${selected ? ", seçili" : ""}`}
-      className={`group relative ${isReel ? "aspect-[2/3]" : "aspect-[3/4]"} overflow-hidden text-left outline-none transition duration-200 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-600 ${
+      className={`group relative ${gridCellAspectClass(post.postType)} overflow-hidden text-left outline-none transition duration-200 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-600 ${
         selected
           ? "ring-2 ring-inset ring-sky-600"
           : `hover:z-10 hover:ring-2 hover:ring-inset ${ringTheme}`
@@ -95,7 +95,7 @@ function GridCellView({
           <span className="text-xs text-red-500">Görsel yüklenemedi</span>
         </div>
       ) : null}
-      {/* Instagram 1:1 kırpma: object-cover ile merkezden kırpılır; orijinal dosya değişmez */}
+      {/* Hücre oranında (Post 3:4, Reel 2:3) object-cover ile merkezden kırpılır; orijinal dosya değişmez */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { reconcileWorkspaceState } from "./workspace-store";
+import { buildStoryRows, reconcileWorkspaceState } from "./workspace-store";
 import type { PersistedAppState } from "./storage";
 
 const brand = { id: "brand-a", name: "Brand", username: "brand" };
@@ -26,5 +26,29 @@ describe("reconcileWorkspaceState", () => {
     expect(reconciled.projects?.[0].plannedPosts).toHaveLength(1);
     expect(reconciled.projects?.[0].existingPosts[0]).toMatchObject({ source: "mevcut", pinned: true, caption: "Mevcut" });
     expect(reconciled.projects?.[0].plannedPosts[0]).toMatchObject({ source: "planlanan", planOrder: 0, caption: "Plan" });
+  });
+});
+
+describe("buildStoryRows", () => {
+  const story = (id: string, mediaUrl: string) => ({ id, mediaType: "image" as const, mediaUrl, createdAt: "2026-10-01T00:00:00.000Z", sortOrder: 0 });
+
+  it("her Story satırını kendi projesinin project_id'si ile yazar", () => {
+    const rows = buildStoryRows("user-1", [
+      { ...project, id: "p-sep", month: 9, existingPosts: [], plannedPosts: [], stories: [story("s-sep", "storage:workspace-media/user-1/brand-a/story/a.jpg")] },
+      { ...project, id: "p-oct", month: 10, existingPosts: [], plannedPosts: [], stories: [story("s-oct", "storage:workspace-media/user-1/brand-a/story/b.jpg")] },
+    ]);
+    expect(rows.map((row) => [row.id, row.project_id, row.brand_id, row.media_path])).toEqual([
+      ["s-sep", "p-sep", "brand-a", "user-1/brand-a/story/a.jpg"],
+      ["s-oct", "p-oct", "brand-a", "user-1/brand-a/story/b.jpg"],
+    ]);
+  });
+
+  it("Storage'a bağlanmamış medyayı (blob/imzalı URL) asla yazmaz", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const rows = buildStoryRows("user-1", [
+      { ...project, existingPosts: [], plannedPosts: [], stories: [story("s-blob", "blob:https://app.test/x"), story("s-url", "https://cdn.example.test/x.jpg")] },
+    ]);
+    expect(rows).toEqual([]);
+    warn.mockRestore();
   });
 });

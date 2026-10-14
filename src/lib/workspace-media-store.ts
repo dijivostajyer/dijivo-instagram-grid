@@ -46,10 +46,38 @@ export async function resolveWorkspaceMedia(value: string): Promise<string> {
   return data.signedUrl;
 }
 
+/**
+ * Durumdaki medya değerini (ref, imzalı URL veya `refByObjectUrl` ile
+ * eşlenmiş URL) kanonik workspace-media referansına çevirir.
+ */
+export function toWorkspaceMediaRef(value: string | undefined, refByUrl?: ReadonlyMap<string, string>): string | undefined {
+  if (!value) return undefined;
+  if (isWorkspaceMediaRef(value)) return value;
+  const mapped = refByUrl?.get(value);
+  if (mapped && isWorkspaceMediaRef(mapped)) return mapped;
+  return workspaceMediaRefFromSignedUrl(value);
+}
+
 export async function uploadWorkspaceMedia(value: string, purpose: string): Promise<string> {
   if (isWorkspaceMediaRef(value) || !value) return value;
   const existingRef = workspaceMediaRefFromSignedUrl(value);
   if (existingRef) return existingRef;
+  return uploadFromUrl(value, purpose);
+}
+
+/**
+ * Kaynağın içeriğini HER ZAMAN yeni bir Storage nesnesine kopyalar.
+ * Kopyalanan kayıtlar (ör. önceki aydan taşınan Story) kaynakla aynı
+ * path'i paylaşmasın diye kullanılır; böylece birinin silinmesi diğerinin
+ * medyasını bozmaz.
+ */
+export async function duplicateWorkspaceMedia(value: string, purpose: string): Promise<string> {
+  const ref = toWorkspaceMediaRef(value);
+  const source = ref ? await resolveWorkspaceMedia(ref) : value;
+  return uploadFromUrl(source, purpose);
+}
+
+async function uploadFromUrl(value: string, purpose: string): Promise<string> {
   const blobResponse = await fetch(value);
   if (!blobResponse.ok) throw new Error(`Yerel medya okunamadı (HTTP ${blobResponse.status}).`);
   const blob = await blobResponse.blob();
