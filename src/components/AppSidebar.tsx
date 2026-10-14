@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArchiveBoxIcon,
   ArrowDownTrayIcon,
   CalendarDaysIcon,
   CalendarIcon,
@@ -27,6 +28,7 @@ export type AppView =
   | "share"
   | "feedback"
   | "export"
+  | "backups"
   | "settings";
 
 const NAV_ITEMS: Array<{
@@ -43,6 +45,7 @@ const NAV_ITEMS: Array<{
   { view: "share", label: "Paylaşım", icon: ShareIcon },
   { view: "feedback", label: "Geri Dönüşler", icon: ChatBubbleLeftRightIcon },
   { view: "export", label: "Dışa Aktarma", icon: ArrowDownTrayIcon },
+  { view: "backups", label: "Yedekleme", icon: ArchiveBoxIcon },
   { view: "settings", label: "Ayarlar", icon: Cog6ToothIcon },
 ];
 
@@ -56,6 +59,7 @@ export const VIEW_TITLES: Record<AppView, string> = {
   share: "Paylaşım",
   feedback: "Geri Dönüşler",
   export: "Dışa Aktarma",
+  backups: "Yedekleme",
   settings: "Ayarlar",
 };
 

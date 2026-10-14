@@ -26,6 +26,10 @@ dev.log
 .env*
 !.env.example
 
+# yedek paketleri (development fallback: <proje>/.backups); asla commit edilmez
+/.backups/
+*.zip.partial
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

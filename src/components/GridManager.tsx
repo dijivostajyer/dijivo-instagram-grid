@@ -5,6 +5,7 @@ import { PhotoIcon, XMarkIcon } from "@heroicons/react/16/solid";
 
 import AppSidebar, { type AppView } from "@/components/AppSidebar";
 import AppTopbar from "@/components/AppTopbar";
+import BackupCenter from "@/components/BackupCenter";
 import BrandEditor from "@/components/BrandEditor";
 import CalendarView from "@/components/calendar/CalendarView";
 import BrandHub from "@/components/BrandHub";
@@ -15,6 +16,8 @@ import ExistingPostList from "@/components/ExistingPostList";
 import ExportWorkspace from "@/components/ExportWorkspace";
 import FeedbackCenter, { type FeedbackTargetLink } from "@/components/FeedbackCenter";
 import { createHttpFeedbackCenterSource } from "@/lib/feedback-center-client";
+import { createHttpBackupSource } from "@/lib/backup/client";
+import { consumeRestoreNotice } from "@/lib/backup/restore-sync";
 import { resolveFeedbackNavigation } from "@/lib/feedback-center";
 import GridPreview from "@/components/GridPreview";
 import MonthlyProjects from "@/components/MonthlyProjects";
@@ -99,6 +102,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     createProject,
     copyPostToProject,
     copyHighlightToBrand,
+    prepareForRemoteReload,
   } = usePersistedGrid();
   const [pinError, setPinError] = useState<string | null>(null);
   const [plannedError, setPlannedError] = useState<string | null>(null);
@@ -490,6 +494,18 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   }
 
   const feedbackSource = useMemo(() => createHttpFeedbackCenterSource(), []);
+  const backupSource = useMemo(() => createHttpBackupSource(), []);
+  // Geri yükleme sonrası yeniden yüklenen sayfada tek seferlik bildirim.
+  const [restoreNotice, setRestoreNotice] = useState(false);
+  useEffect(() => {
+    if (consumeRestoreNotice()) setRestoreNotice(true);
+  }, []);
+
+  /** Geri yükleme bitti: otomatik kaydı durdur, yerel önbelleği temizle, buluttan yeniden yükle. */
+  async function handleRestored(epoch: string) {
+    await prepareForRemoteReload(epoch);
+    window.location.reload();
+  }
   // Faz 5: okunmamış geri bildirim rozeti ve son bildirimler (60 sn yoklama,
   // sekme gizliyken durur). Kaynak share_feedback.read_at.
   const notifications = useFeedbackNotifications(feedbackSource, { enabled: ready && brands.length > 0 });
@@ -587,6 +603,14 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
           />
 
           <main className="px-4 py-6 sm:px-6 lg:py-8">
+            {restoreNotice ? (
+              <div role="status" className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                <span className="min-w-0 flex-1">Geri yükleme tamamlandı.</span>
+                <button type="button" onClick={() => setRestoreNotice(false)} aria-label="Bildirimi kapat" className="shrink-0 rounded p-0.5 hover:bg-black/5">
+                  <XMarkIcon className="size-4" aria-hidden="true" />
+                </button>
+              </div>
+            ) : null}
             {syncError ? (
               <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                 {syncError}
@@ -915,6 +939,10 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     : "—"
                 }
               />
+            ) : null}
+
+            {view === "backups" ? (
+              <BackupCenter source={backupSource} onRestored={handleRestored} />
             ) : null}
 
             {view === "settings" ? (

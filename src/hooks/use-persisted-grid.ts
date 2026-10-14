@@ -62,6 +62,13 @@ import {
   replaceStoryMedia,
 } from "../lib/story-ops";
 import { withBasePath } from "../lib/base-path";
+import {
+  RESTORED_ELSEWHERE_MESSAGE,
+  markRestoreNotice,
+  readLocalEpoch,
+  readRemoteRestoreEpoch,
+  writeLocalEpoch,
+} from "../lib/backup/restore-sync";
 
 /**
  * §16/§2: tip tanımıları saf geçiş modülünde (brand-ops) yaşar;
@@ -246,6 +253,13 @@ export interface PersistedGrid {
   activeProjectId: string;
   selectProject: (id: string) => void;
   createProject: (name: string, month: number, year: number, copyPrevious: boolean) => string | null;
+  /**
+   * Sunucuda geri yükleme tamamlandıktan sonra çağrılır: otomatik kaydı
+   * durdurur, bekleyen yazımı bitirir, yerel önbelleği (localStorage +
+   * IndexedDB) temizler ve yeni epoch'u yazar. Ardından sayfa yeniden
+   * yüklenir ve veri buluttan hydrate edilir.
+   */
+  prepareForRemoteReload: (epoch: string) => Promise<void>;
 }
 
 /**
@@ -278,6 +292,10 @@ export function usePersistedGrid(): PersistedGrid {
   // Aynı blob/dış URL'in her autosave'de Storage'a yeniden yüklenmesini
   // önler (kaynak → workspace-media ref, oturum boyunca).
   const mediaUploadCacheRef = useRef<WorkspaceMediaUploadCache>(new Map());
+  // Geri yükleme epoch'u: undefined → sunucu desteklemiyor/okunamadı (kontrol yok).
+  const epochRef = useRef<string | null | undefined>(undefined);
+  // Geri yükleme sonrası veya başka sekmede geri yükleme fark edilince: yazım yok.
+  const syncPausedRef = useRef(false);
 
   stateRef.current = state;
 
@@ -285,7 +303,26 @@ export function usePersistedGrid(): PersistedGrid {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const localPersisted = loadAppState(getBrowserStorage(), getDefaultAppState());
+      const browserStorage = getBrowserStorage();
+      const db = getSupabaseBrowserClient();
+      const user = (await db?.auth.getUser())?.data.user ?? null;
+      workspaceUserRef.current = user;
+      let localPersisted = loadAppState(browserStorage, getDefaultAppState());
+      if (user && db) {
+        // Çalışma alanı başka yerde bir yedekten geri yüklendiyse yerel kopya
+        // bayattır: buluta geri yazılmadan (reconcile edilmeden) atılır.
+        const remote = await readRemoteRestoreEpoch(db);
+        if (remote.supported) {
+          if (remote.epoch && remote.epoch !== readLocalEpoch(browserStorage)) {
+            clearPersistedState(browserStorage);
+            await clearStoredImages().catch(() => undefined);
+            await clearStoredVideos().catch(() => undefined);
+            localPersisted = getDefaultAppState();
+          }
+          writeLocalEpoch(browserStorage, remote.epoch);
+          epochRef.current = remote.epoch;
+        }
+      }
       // Local IDB refs must become Blob URLs before reconciliation so their
       // media can be streamed to Storage instead of being dropped as `idb:`.
       const local = await hydrateState(
@@ -293,9 +330,6 @@ export function usePersistedGrid(): PersistedGrid {
         refByObjectUrl.current,
         trackedObjectUrls.current,
       );
-      const db = getSupabaseBrowserClient();
-      const user = (await db?.auth.getUser())?.data.user ?? null;
-      workspaceUserRef.current = user;
       let stored = local;
       if (user) {
         try {
@@ -343,8 +377,17 @@ export function usePersistedGrid(): PersistedGrid {
       skipPersistRef.current = false;
       return;
     }
+    if (syncPausedRef.current) return;
+    const browserStorage = getBrowserStorage();
+    // Aynı tarayıcıdaki başka bir sekme geri yükleme yaptıysa bu sekmenin
+    // durumu bayattır; ortak localStorage'ın üzerine yazılmaz.
+    if (epochRef.current !== undefined && readLocalEpoch(browserStorage) !== epochRef.current) {
+      syncPausedRef.current = true;
+      setSyncError(RESTORED_ELSEWHERE_MESSAGE);
+      return;
+    }
     writePersistedState(
-      getBrowserStorage(),
+      browserStorage,
       toPersistableState(stateRef.current, refByObjectUrl.current),
     );
     const user = workspaceUserRef.current;
@@ -359,6 +402,17 @@ export function usePersistedGrid(): PersistedGrid {
       syncChainRef.current = syncChainRef.current
         .catch(() => undefined)
         .then(async () => {
+          if (syncPausedRef.current) return;
+          const db = getSupabaseBrowserClient();
+          if (db && epochRef.current !== undefined) {
+            // Başka cihazda geri yükleme yapıldıysa bayat durum buluta yazılmaz.
+            const remote = await readRemoteRestoreEpoch(db);
+            if (remote.supported && remote.epoch !== epochRef.current) {
+              syncPausedRef.current = true;
+              setSyncError(RESTORED_ELSEWHERE_MESSAGE);
+              return;
+            }
+          }
           await pushWorkspace(user, snapshot, mediaUploadCacheRef.current);
           if (sequence === syncSequenceRef.current) setSyncError(null);
         })
@@ -682,6 +736,19 @@ export function usePersistedGrid(): PersistedGrid {
     [commit],
   );
 
+  const prepareForRemoteReload = useCallback(async (epoch: string) => {
+    syncPausedRef.current = true;
+    await syncChainRef.current.catch(() => undefined);
+    const browserStorage = getBrowserStorage();
+    mediaUploadCacheRef.current.clear();
+    clearPersistedState(browserStorage);
+    await clearStoredImages().catch(() => undefined);
+    await clearStoredVideos().catch(() => undefined);
+    writeLocalEpoch(browserStorage, epoch);
+    epochRef.current = epoch;
+    markRestoreNotice();
+  }, []);
+
   return {
     brand: state.brand,
     existingPosts: state.existingPosts,
@@ -712,5 +779,6 @@ export function usePersistedGrid(): PersistedGrid {
     activeProjectId: state.activeProjectId ?? "",
     selectProject,
     createProject,
+    prepareForRemoteReload,
   };
 }
