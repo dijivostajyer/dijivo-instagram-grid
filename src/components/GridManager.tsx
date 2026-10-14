@@ -13,6 +13,9 @@ import BulkCopyDialog from "@/components/BulkCopyDialog";
 import DashboardOverview from "@/components/DashboardOverview";
 import ExistingPostList from "@/components/ExistingPostList";
 import ExportWorkspace from "@/components/ExportWorkspace";
+import FeedbackCenter, { type FeedbackTargetLink } from "@/components/FeedbackCenter";
+import { createHttpFeedbackCenterSource } from "@/lib/feedback-center-client";
+import { resolveFeedbackNavigation } from "@/lib/feedback-center";
 import GridPreview from "@/components/GridPreview";
 import MonthlyProjects from "@/components/MonthlyProjects";
 import NewBrandModal from "@/components/NewBrandModal";
@@ -483,6 +486,22 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     setView("planner");
   }
 
+  const feedbackSource = useMemo(() => createHttpFeedbackCenterSource(), []);
+
+  // Geri Dönüşler → "Projeye Git": ilgili markanın aylık planını Grid
+  // Planner'da açar; Post/Reel hâlâ plandaysa modalı, Story için Story
+  // sekmesini açar. Plan silinmişse hiçbir şey değişmez.
+  function handleOpenFeedbackTarget(target: FeedbackTargetLink) {
+    const navigation = resolveFeedbackNavigation(allProjects, target);
+    if (!navigation) return;
+    if (navigation.brandId) selectBrand(navigation.brandId);
+    selectProject(navigation.projectId);
+    setSelectedPostId(navigation.postId);
+    if (navigation.openStories) setMediaTab("stories");
+    setView("planner");
+    setSidebarOpen(false);
+  }
+
   // §4: "Markayı Aç" — aktif markayı seçer; hook aynı
   // zamanda o markanın en son güncellenmiş planını
   // seçer (başka markanın projesi asla seçilmez) ve
@@ -832,6 +851,15 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                 brands={brands}
                 onCopyHighlight={copyHighlightToBrand}
                 onDelete={async () => { await deleteBrand(activeBrandId); setView("brands"); }}
+              />
+            ) : null}
+
+            {view === "feedback" ? (
+              <FeedbackCenter
+                source={feedbackSource}
+                brands={brands}
+                projects={allProjects}
+                onOpenTarget={handleOpenFeedbackTarget}
               />
             ) : null}
 

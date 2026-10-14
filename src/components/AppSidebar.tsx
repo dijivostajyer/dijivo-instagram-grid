@@ -4,6 +4,7 @@ import {
   ArrowDownTrayIcon,
   CalendarDaysIcon,
   CalendarIcon,
+  ChatBubbleLeftRightIcon,
   Cog6ToothIcon,
   HomeIcon,
   IdentificationIcon,
@@ -23,6 +24,7 @@ export type AppView =
   | "planner"
   | "profile"
   | "share"
+  | "feedback"
   | "export"
   | "settings";
 
@@ -38,6 +40,7 @@ const NAV_ITEMS: Array<{
   { view: "planner", label: "Grid Planner", icon: Squares2X2Icon },
   { view: "profile", label: "Marka Profili", icon: UserCircleIcon },
   { view: "share", label: "Paylaşım", icon: ShareIcon },
+  { view: "feedback", label: "Geri Dönüşler", icon: ChatBubbleLeftRightIcon },
   { view: "export", label: "Dışa Aktarma", icon: ArrowDownTrayIcon },
   { view: "settings", label: "Ayarlar", icon: Cog6ToothIcon },
 ];
@@ -50,6 +53,7 @@ export const VIEW_TITLES: Record<AppView, string> = {
   planner: "Grid Planner",
   profile: "Marka Profili",
   share: "Paylaşım",
+  feedback: "Geri Dönüşler",
   export: "Dışa Aktarma",
   settings: "Ayarlar",
 };
