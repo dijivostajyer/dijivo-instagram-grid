@@ -36,6 +36,7 @@ import { resolveCalendarLink } from "@/lib/calendar-link";
 import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import { gridCellMediaSrc } from "@/lib/grid-ratio";
+import { reorderGridPosts } from "@/lib/grid-reorder";
 import { monthLabel } from "@/lib/project-ops";
 import { type TypeFilter } from "@/lib/plan-stats";
 import {
@@ -269,6 +270,17 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   function handleDeletePlanned(id: string) {
     setPlannedPosts((prev) => deletePlannedPost(prev, id));
     setSelectedPostId((current) => (current === id ? null : current));
+  }
+
+  // Grid üzerinde sürükle-bırak: içerik yalnız kendi bölgesinde
+  // (sabitlenmiş / planlanan / mevcut) taşınır; geçersiz taşımada state
+  // değişmez. Yalnız sıra alanı (pinnedOrder / planOrder / recencyIndex)
+  // yeniden yazılır, içeriğin kaynağı korunur.
+  function handleReorderGrid(activeId: string, overId: string) {
+    const next = reorderGridPosts(existingPosts, plannedPosts, activeId, overId);
+    if (!next) return;
+    if (next.existingPosts !== existingPosts) setExistingPosts(next.existingPosts);
+    if (next.plannedPosts !== plannedPosts) setPlannedPosts(next.plannedPosts);
   }
 
   function handleReorderPlanned(orderedIds: string[]) {
@@ -789,6 +801,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     selectedPostId={selectedPostId}
                     onSelectPost={setSelectedPostId}
                     stories={activeProject?.stories}
+                    onReorder={handleReorderGrid}
                   />
                   <p className="mt-3 text-sm text-neutral-500">
                     Görseller merkezden kırpılır: Post 3:4, Reel 2:3 ({GRID_COLUMNS} sütun).
