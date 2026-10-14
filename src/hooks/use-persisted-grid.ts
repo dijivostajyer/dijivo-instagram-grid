@@ -46,7 +46,7 @@ import {
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 import { pullWorkspace, pushWorkspace, reconcileWorkspaceState } from "../lib/workspace-store";
-import { isWorkspaceMediaRef, resolveWorkspaceMedia } from "../lib/workspace-media-store";
+import { isWorkspaceMediaRef, resolveWorkspaceMedia, workspaceMediaPath } from "../lib/workspace-media-store";
 import { withBasePath } from "../lib/base-path";
 
 /**
@@ -114,6 +114,10 @@ export async function hydrateState(
     highlights: await Promise.all((brand.highlights ?? []).map(async (highlight) => ({
       ...highlight,
       imageUrl: await resolve(highlight.imageUrl),
+    }))),
+    stories: await Promise.all((brand.stories ?? []).map(async (story) => ({
+      ...story,
+      mediaUrl: (await resolve(story.mediaUrl)) ?? story.mediaUrl,
     }))),
   });
   const hydratedBrand = await hydrateBrand(state.brand);
@@ -207,6 +211,8 @@ export interface PersistedGrid {
   /** Kalıcı veriyi siler ve temiz workspace'a (onboarding) döner. */
   resetToDefaults: () => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
+  /** Sadece seçilen Story kaydını ve ona ait workspace medyasını siler. */
+  deleteStory: (storyId: string) => Promise<void>;
   /** Aktif markaya ait projeler (sıkı marka izolasyonu, §5). */
   projects: GridProject[];
   /** Tüm markaların projeleri (çapraz proje/marka kopyalama picker'ı için). */
@@ -400,6 +406,11 @@ export function usePersistedGrid(): PersistedGrid {
           void persistUpload(url);
         }
       }
+      for (const story of next.stories ?? []) {
+        if (story.mediaUrl.startsWith("blob:") && !refByObjectUrl.current.has(story.mediaUrl)) {
+          void (story.mediaType === "video" ? persistVideoUpload(story.mediaUrl) : persistUpload(story.mediaUrl));
+        }
+      }
       const previousState = stateRef.current;
       // §7/§8/§11: marka düzenlemesi kayıt defterindeki ilgili
       // marka girişini günceller; aktif bağlam yalnızca aktif
@@ -413,7 +424,7 @@ export function usePersistedGrid(): PersistedGrid {
       });
       commit(nextState);
     },
-    [commit, persistUpload],
+    [commit, persistUpload, persistVideoUpload],
   );
 
   const setBrand = useCallback(
@@ -543,6 +554,22 @@ export function usePersistedGrid(): PersistedGrid {
     commit(next);
   }, [commit]);
 
+  const deleteStory = useCallback(async (storyId: string) => {
+    const currentBrand = (stateRef.current.brands ?? []).find((brand) => brand.id === stateRef.current.activeBrandId);
+    const story = currentBrand?.stories?.find((item) => item.id === storyId);
+    if (!currentBrand || !story) throw new Error("Story bulunamadı.");
+    const db = getSupabaseBrowserClient();
+    const { data: userData } = await db?.auth.getUser() ?? { data: { user: null } };
+    if (!db || !userData.user) throw new Error("Story silmek için giriş yapın.");
+    const { error } = await db.from("workspace_stories").delete().eq("id", storyId).eq("user_id", userData.user.id);
+    if (error) throw new Error(`Story silinemedi: ${error.message}`);
+    if (isWorkspaceMediaRef(story.mediaUrl)) {
+      const { error: mediaError } = await db.storage.from("workspace-media").remove([workspaceMediaPath(story.mediaUrl)]);
+      if (mediaError) console.warn("[workspace] Story medyası silinemedi; kayıt silindi.", mediaError);
+    }
+    updateBrand(currentBrand.id, { ...currentBrand, stories: (currentBrand.stories ?? []).filter((item) => item.id !== storyId).map((item, index) => ({ ...item, sortOrder: index })) });
+  }, [updateBrand]);
+
   const selectProject = useCallback(
     (id: string) => {
       const next = selectProjectState(stateRef.current, id);
@@ -597,6 +624,7 @@ export function usePersistedGrid(): PersistedGrid {
     persistVideoUpload,
     resetToDefaults,
     deleteBrand,
+    deleteStory,
     projects: (state.projects ?? []).filter(
       (project) =>
         !state.activeBrandId || !project.brandId || project.brandId === state.activeBrandId,

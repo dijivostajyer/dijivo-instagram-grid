@@ -14,6 +14,16 @@ export interface Highlight {
   imageUrl?: string;
 }
 
+/** Markaya bağlı, manuel yönetilen Instagram Story kaydı. */
+export interface Story {
+  id: string;
+  mediaType: "image" | "video";
+  mediaUrl: string;
+  createdAt: string;
+  sortOrder: number;
+  expiresAt?: string;
+}
+
 /** Marka bazlı hashtag grubu: caption'a tek tıkla eklenir. */
 export interface HashtagGroup {
   id: string;
@@ -47,6 +57,8 @@ export interface Brand {
   followersCount?: number;
   followingCount?: number;
   highlights?: Highlight[];
+  /** Profilde görünen aktif Story'ler; share snapshot'ına dahil edilmez. */
+  stories?: Story[];
   /** Marka bazlı hashtag grupları (isteğe bağlı) */
   hashtagGroups?: HashtagGroup[];
   /** Hazır @mention'lar (isteğe bağlı) */

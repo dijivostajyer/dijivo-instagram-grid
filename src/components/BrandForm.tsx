@@ -210,9 +210,12 @@ export default function BrandForm({
             disabled={isImporting || !instagramUrl.trim()}
             className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
           >
-            {isImporting ? "Instagram bilgileri hazırlanıyor..." : "Instagram’dan Bilgileri Getir"}
+            {isImporting ? "Instagram bilgileri hazırlanıyor..." : "Çek"}
           </button>
         </div>
+        <p className="mt-1 text-xs text-neutral-500">
+          Instagram bilgilerini getirmek 3–4 dakika sürebilir.
+        </p>
         {importWarning && (
           <p className="mt-1 text-xs text-amber-700">{importWarning}</p>
         )}

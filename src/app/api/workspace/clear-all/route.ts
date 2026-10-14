@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
     const deletionResults = await Promise.all([
       client.from("workspace_prefs").delete().eq("user_id", userId),
       client.from("workspace_highlights").delete().eq("user_id", userId),
+      client.from("workspace_stories").delete().eq("user_id", userId),
       client.from("workspace_posts").delete().eq("user_id", userId),
       client.from("workspace_projects").delete().eq("user_id", userId),
       client.from("workspace_brands").delete().eq("user_id", userId),

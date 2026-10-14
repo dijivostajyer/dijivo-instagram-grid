@@ -81,6 +81,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     persistVideoUpload,
     resetToDefaults,
     deleteBrand,
+    deleteStory,
     projects,
     allProjects,
     activeProjectId,
@@ -780,6 +781,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                 brands={brands}
                 onCopyHighlight={copyHighlightToBrand}
                 onDelete={async () => { await deleteBrand(activeBrandId); setView("brands"); }}
+                onDeleteStory={deleteStory}
               />
             ) : null}
 

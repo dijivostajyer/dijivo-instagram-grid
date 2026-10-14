@@ -1,4 +1,4 @@
-import type { Brand, ExistingPost, PlannedPost, PostType } from "./types";
+import type { Brand, ExistingPost, PlannedPost, PostType, Story } from "./types";
 
 /**
  * Uygulama metaverisi kalıcılığı (MVP aşama 4).
@@ -98,6 +98,13 @@ function isMediaType(value: unknown): value is "image" | "video" {
   return value === undefined || value === "image" || value === "video";
 }
 
+function isStory(value: unknown): value is Story {
+  return isRecord(value) && typeof value.id === "string" &&
+    (value.mediaType === "image" || value.mediaType === "video") &&
+    typeof value.mediaUrl === "string" && typeof value.createdAt === "string" &&
+    typeof value.sortOrder === "number" && isOptionalString(value.expiresAt);
+}
+
 function isBrand(value: unknown): value is Brand {
   if (!isRecord(value)) return false;
   return (
@@ -115,6 +122,7 @@ function isBrand(value: unknown): value is Brand {
     && (value.followersCount === undefined || typeof value.followersCount === "number")
     && (value.followingCount === undefined || typeof value.followingCount === "number")
     && (value.highlights === undefined || (Array.isArray(value.highlights) && value.highlights.every((highlight) => isRecord(highlight) && typeof highlight.id === "string" && typeof highlight.title === "string" && isOptionalString(highlight.imageUrl))))
+    && (value.stories === undefined || (Array.isArray(value.stories) && value.stories.every(isStory)))
     && (value.hashtagGroups === undefined || (Array.isArray(value.hashtagGroups) && value.hashtagGroups.every(isHashtagGroup)))
     && (value.defaultMentions === undefined || isStringArray(value.defaultMentions))
     && (value.defaultCtas === undefined || isStringArray(value.defaultCtas))
@@ -382,6 +390,7 @@ export function toPersistableState(
     ...brand,
     profileImageUrl: resolveUrl(brand.profileImageUrl),
     highlights: brand.highlights?.map((highlight) => ({ ...highlight, imageUrl: resolveUrl(highlight.imageUrl) })),
+    stories: brand.stories?.map((story) => ({ ...story, mediaUrl: resolveUrl(story.mediaUrl) ?? story.mediaUrl })),
   });
   const profileImageUrl = resolveUrl(state.brand.profileImageUrl);
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import BrandEditor from "@/components/BrandEditor";
+import StoryManager from "@/components/StoryManager";
 import type { Brand } from "@/lib/types";
 
 /**
@@ -15,6 +16,7 @@ export default function BrandProfilePage({
   brands,
   onCopyHighlight,
   onDelete,
+  onDeleteStory,
 }: {
   brand: Brand;
   onChange: (next: Brand) => void;
@@ -22,6 +24,7 @@ export default function BrandProfilePage({
   brands: Brand[];
   onCopyHighlight: (highlightId: string, targetBrandId: string) => string | null;
   onDelete: () => Promise<void>;
+  onDeleteStory: (storyId: string) => Promise<void>;
 }) {
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +41,7 @@ export default function BrandProfilePage({
         brands={brands}
         onCopyHighlight={onCopyHighlight}
       />
+      <StoryManager brand={brand} onChange={onChange} onDelete={onDeleteStory} />
       <section className="mt-8 rounded-xl border border-red-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-neutral-900">Tehlikeli alan</h2>
         <button type="button" onClick={() => { setError(null); setConfirm(true); }} className="mt-3 inline-flex h-9 items-center rounded-lg bg-red-600 px-3 text-sm font-medium text-white hover:bg-red-700">Markayı Sil</button>

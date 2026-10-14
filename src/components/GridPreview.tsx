@@ -12,6 +12,7 @@ import {
   VideoCameraIcon,
   Squares2X2Icon,
 } from "@heroicons/react/16/solid";
+import StoryViewer from "./StoryViewer";
 
 import type { Brand, GridResult } from "@/lib/types";
 import {
@@ -153,6 +154,8 @@ export default function GridPreview({
   const [theme, toggleTheme] = useInstagramPreviewTheme();
   const dark = theme === "dark";
   const [tab, setTab] = useState<PreviewTab>("post");
+  const [storyOpen, setStoryOpen] = useState(false);
+  const activeStories = (brand.stories ?? []).filter((story) => !story.expiresAt || Date.parse(story.expiresAt) > Date.now());
 
   const postCount = brand.postCount ?? result.cells.length;
   const reelCells = result.cells.filter((cell) => cell.post.postType === "reel");
@@ -180,23 +183,14 @@ export default function GridPreview({
     >
       {/* Profil başlığı (§14: gerçek Instagram profili görünümü) */}
       <header className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-6">
-        {brand.profileImageUrl ? (
+        {activeStories.length ? (
+          <button type="button" onClick={() => setStoryOpen(true)} aria-label={`${brand.name} Story'lerini aç`} className={`shrink-0 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-violet-500 p-[3px] ${highlightRing(theme)} ring-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600`}>
+            {brand.profileImageUrl ? <img src={brand.profileImageUrl} alt={`${brand.name} profil görseli`} className="h-16 w-16 rounded-full object-cover sm:h-24 sm:w-24" /> : <span className={`flex h-16 w-16 items-center justify-center rounded-full text-xl font-medium sm:h-24 sm:w-24 ${dark ? "bg-neutral-800" : "bg-neutral-200"}`}>{brand.name.charAt(0)}</span>}
+          </button>
+        ) : brand.profileImageUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={brand.profileImageUrl}
-            alt={`${brand.name} profil görseli`}
-            className="h-16 w-16 shrink-0 rounded-full object-cover outline-1 -outline-offset-1 outline-black/10 sm:h-24 sm:w-24"
-          />
-        ) : (
-          <div
-            aria-hidden="true"
-            className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-medium sm:h-24 sm:w-24 ${
-              dark ? "bg-neutral-800" : "bg-neutral-200"
-            }`}
-          >
-            {brand.name.charAt(0)}
-          </div>
-        )}
+          <img src={brand.profileImageUrl} alt={`${brand.name} profil görseli`} className="h-16 w-16 shrink-0 rounded-full object-cover outline-1 -outline-offset-1 outline-black/10 sm:h-24 sm:w-24" />
+        ) : <div aria-hidden="true" className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-medium sm:h-24 sm:w-24 ${dark ? "bg-neutral-800" : "bg-neutral-200"}`}>{brand.name.charAt(0)}</div>}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <h2 className={`truncate text-xl font-semibold tracking-tight ${textPrimary}`}>
@@ -302,6 +296,7 @@ export default function GridPreview({
           ))}
         </div>
       ) : null}
+      {storyOpen ? <StoryViewer brand={brand} stories={activeStories} onClose={() => setStoryOpen(false)} /> : null}
 
       {/* Post / Reels sekmeleri (§14) */}
       <div

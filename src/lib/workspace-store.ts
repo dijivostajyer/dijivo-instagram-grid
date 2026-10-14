@@ -23,6 +23,7 @@ async function materializeMedia(state: PersistedAppState): Promise<PersistedAppS
     ...item,
     profileImageUrl: await upload(item.profileImageUrl, `${item.id}/profile`),
     highlights: await Promise.all((item.highlights ?? []).map(async (highlight) => ({ ...highlight, imageUrl: await upload(highlight.imageUrl, `${item.id}/highlight`) }))),
+    stories: await Promise.all((item.stories ?? []).map(async (story) => ({ ...story, mediaUrl: (await upload(story.mediaUrl, `${item.id}/story`)) ?? story.mediaUrl }))),
   });
   const materializePost = async <T extends ExistingPost | PlannedPost>(item: T, brandId: string): Promise<T> => {
     const externalUrl = item.externalUrl ?? (isInstagramPostUrl(item.videoUrl) ? item.videoUrl : undefined);
@@ -60,6 +61,8 @@ function mergeBrand(remote: Brand, local: Brand): Brand {
     remoteValue ?? localValue;
   const remoteHighlights = remote.highlights ?? [];
   const highlightIds = new Set(remoteHighlights.map((highlight) => highlight.id));
+  const remoteStories = remote.stories ?? [];
+  const storyIds = new Set(remoteStories.map((story) => story.id));
   return {
     ...local,
     ...remote,
@@ -75,6 +78,7 @@ function mergeBrand(remote: Brand, local: Brand): Brand {
     defaultMentions: remote.defaultMentions?.length ? remote.defaultMentions : (local.defaultMentions ?? []),
     defaultCtas: remote.defaultCtas?.length ? remote.defaultCtas : (local.defaultCtas ?? []),
     highlights: [...remoteHighlights, ...(local.highlights ?? []).filter((highlight) => !highlightIds.has(highlight.id))],
+    stories: [...remoteStories, ...(local.stories ?? []).filter((story) => !storyIds.has(story.id))],
   };
 }
 
@@ -132,16 +136,18 @@ export function reconcileWorkspaceState(
 
 export async function pullWorkspace(user: User): Promise<PersistedAppState | null> {
   const db = getSupabaseBrowserClient(); if (!db) return null;
-  const [brandsResult, projectsResult, postsResult, highlightsResult, prefsResult] = await Promise.all([
+  const [brandsResult, projectsResult, postsResult, highlightsResult, storiesResult, prefsResult] = await Promise.all([
     db.from("workspace_brands").select("*").eq("user_id", user.id), db.from("workspace_projects").select("*").eq("user_id", user.id),
     db.from("workspace_posts").select("*").eq("user_id", user.id), db.from("workspace_highlights").select("*").eq("user_id", user.id),
+    db.from("workspace_stories").select("*").eq("user_id", user.id),
     db.from("workspace_prefs").select("*").eq("user_id", user.id).maybeSingle(),
   ]);
-  if (brandsResult.error || projectsResult.error || postsResult.error || highlightsResult.error || prefsResult.error) throw new Error("Workspace okunamadı.");
+  if (brandsResult.error || projectsResult.error || postsResult.error || highlightsResult.error || storiesResult.error || prefsResult.error) throw new Error("Workspace okunamadı.");
   const rawBrands = (brandsResult.data ?? []) as BrandRow[];
   if (!rawBrands.length) return null;
   const rawHighlights = (highlightsResult.data ?? []) as BrandRow[];
-  const brands: Brand[] = rawBrands.map((row) => ({ id: String(row.id), name: String(row.name), username: String(row.username), displayName: row.display_name as string | undefined, profileImageUrl: ref(row.profile_image_path), bio: row.bio as string | undefined, website: row.website as string | undefined, phone: row.phone as string | undefined, email: row.email as string | undefined, category: row.category as string | undefined, postCount: row.post_count as number | undefined, followersCount: row.followers_count as number | undefined, followingCount: row.following_count as number | undefined, hashtagGroups: (row.hashtag_groups as Brand["hashtagGroups"]) ?? [], defaultMentions: (row.default_mentions as string[]) ?? [], defaultCtas: (row.default_ctas as string[]) ?? [], highlights: rawHighlights.filter((h) => h.brand_id === row.id).map((h) => ({ id: String(h.id), title: String(h.title), imageUrl: ref(h.image_path) })) }));
+  const rawStories = (storiesResult.data ?? []) as BrandRow[];
+  const brands: Brand[] = rawBrands.map((row) => ({ id: String(row.id), name: String(row.name), username: String(row.username), displayName: row.display_name as string | undefined, profileImageUrl: ref(row.profile_image_path), bio: row.bio as string | undefined, website: row.website as string | undefined, phone: row.phone as string | undefined, email: row.email as string | undefined, category: row.category as string | undefined, postCount: row.post_count as number | undefined, followersCount: row.followers_count as number | undefined, followingCount: row.following_count as number | undefined, hashtagGroups: (row.hashtag_groups as Brand["hashtagGroups"]) ?? [], defaultMentions: (row.default_mentions as string[]) ?? [], defaultCtas: (row.default_ctas as string[]) ?? [], highlights: rawHighlights.filter((h) => h.brand_id === row.id).map((h) => ({ id: String(h.id), title: String(h.title), imageUrl: ref(h.image_path) })), stories: rawStories.filter((story) => story.brand_id === row.id).map((story) => ({ id: String(story.id), mediaType: story.media_type === "video" ? "video" as const : "image" as const, mediaUrl: ref(story.media_path) ?? "", createdAt: String(story.created_at), sortOrder: Number(story.sort_order), expiresAt: story.expires_at as string | undefined })).filter((story) => Boolean(story.mediaUrl)) }));
   const rawPosts = (postsResult.data ?? []) as PostRow[];
   const projects: GridProject[] = ((projectsResult.data ?? []) as BrandRow[]).map((project) => {
     const mapPost = (row: PostRow) => ({ id: String(row.id), source: row.source as "mevcut" | "planlanan", imageUrl: ref(row.image_path) ?? "", alt: row.alt as string | undefined, aspectRatio: row.aspect_ratio as ExistingPost["aspectRatio"], postType: row.post_type as ExistingPost["postType"], caption: row.caption as string | undefined, mediaType: row.media_type as ExistingPost["mediaType"], videoUrl: ref(row.video_path), coverImageUrl: ref(row.cover_path), externalUrl: row.external_url as string | undefined, recencyIndex: row.recency_index as number, planOrder: row.plan_order as number, pinned: Boolean(row.pinned), pinnedOrder: row.pinned_order as number | undefined });
@@ -177,6 +183,8 @@ export async function pushWorkspace(user: User, input: PersistedAppState): Promi
   }
   const highlights = brands.flatMap((brand) => (brand.highlights ?? []).map((highlight) => ({ user_id: user.id, id: highlight.id, brand_id: brand.id, title: highlight.title, image_path: stored(highlight.imageUrl) })));
   if (highlights.length) { const { error } = await db.from("workspace_highlights").upsert(highlights, { onConflict: "id" }); if (error) throw new Error(`workspace_highlights yazılamadı: ${error.message}`); }
+  const stories = brands.flatMap((brand) => (brand.stories ?? []).map((story) => ({ user_id: user.id, id: story.id, brand_id: brand.id, media_type: story.mediaType, media_path: stored(story.mediaUrl), created_at: story.createdAt, sort_order: story.sortOrder, expires_at: story.expiresAt ?? null })));
+  if (stories.length) { const { error } = await db.from("workspace_stories").upsert(stories, { onConflict: "id" }); if (error) throw new Error(`workspace_stories yazılamadı: ${error.message}`); }
   const { error } = await db.from("workspace_prefs").upsert({ user_id: user.id, active_brand_id: state.activeBrandId || null, active_project_id: state.activeProjectId || null }); if (error) throw new Error(`workspace_prefs yazılamadı: ${error.message}`);
   return syncActiveProject(state);
 }
