@@ -765,6 +765,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     result={grid}
                     selectedPostId={selectedPostId}
                     onSelectPost={setSelectedPostId}
+                    stories={activeProject?.stories}
                   />
                   <p className="mt-3 text-sm text-neutral-500">
                     Görseller Instagram profilindeki gibi merkezden 1:1 kırpılır ({GRID_COLUMNS} sütun).
@@ -781,7 +782,6 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                 brands={brands}
                 onCopyHighlight={copyHighlightToBrand}
                 onDelete={async () => { await deleteBrand(activeBrandId); setView("brands"); }}
-                onDeleteStory={deleteStory}
               />
             ) : null}
 

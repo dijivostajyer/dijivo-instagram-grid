@@ -57,8 +57,6 @@ export interface Brand {
   followersCount?: number;
   followingCount?: number;
   highlights?: Highlight[];
-  /** Profilde görünen aktif Story'ler; share snapshot'ına dahil edilmez. */
-  stories?: Story[];
   /** Marka bazlı hashtag grupları (isteğe bağlı) */
   hashtagGroups?: HashtagGroup[];
   /** Hazır @mention'lar (isteğe bağlı) */

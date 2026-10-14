@@ -14,7 +14,7 @@ import {
 } from "@heroicons/react/16/solid";
 import StoryViewer from "./StoryViewer";
 
-import type { Brand, GridResult } from "@/lib/types";
+import type { Brand, GridResult, Story } from "@/lib/types";
 import {
   useInstagramPreviewTheme,
   type IgPreviewTheme,
@@ -72,7 +72,7 @@ function GridCellView({
       type="button"
       onClick={() => onSelect?.(post.id)}
       aria-label={`${post.alt}${selected ? ", seçili" : ""}`}
-      className={`group relative aspect-square overflow-hidden text-left outline-none transition duration-200 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-600 ${
+      className={`group relative aspect-[3/4] overflow-hidden text-left outline-none transition duration-200 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-600 ${
         selected
           ? "ring-2 ring-inset ring-sky-600"
           : `hover:z-10 hover:ring-2 hover:ring-inset ${ringTheme}`
@@ -144,18 +144,20 @@ export default function GridPreview({
   onImageError,
   onSelectPost,
   selectedPostId,
+  stories,
 }: {
   brand: Brand;
   result: GridResult;
   onImageError?: (id: string) => void;
   onSelectPost?: (id: string) => void;
   selectedPostId?: string | null;
+  stories?: Story[];
 }) {
   const [theme, toggleTheme] = useInstagramPreviewTheme();
   const dark = theme === "dark";
   const [tab, setTab] = useState<PreviewTab>("post");
   const [storyOpen, setStoryOpen] = useState(false);
-  const activeStories = (brand.stories ?? []).filter((story) => !story.expiresAt || Date.parse(story.expiresAt) > Date.now());
+  const activeStories = (stories ?? []).filter((story) => !story.expiresAt || Date.parse(story.expiresAt) > Date.now());
 
   const postCount = brand.postCount ?? result.cells.length;
   const reelCells = result.cells.filter((cell) => cell.post.postType === "reel");

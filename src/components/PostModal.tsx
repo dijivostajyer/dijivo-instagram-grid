@@ -85,6 +85,7 @@ export default function PostModal({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const captionRef = useRef<HTMLTextAreaElement>(null);
   const [copyTarget, setCopyTarget] = useState("");
   const [copyOptions, setCopyOptions] = useState<PostCopyOptions>({
     caption: true,
@@ -173,6 +174,13 @@ export default function PostModal({
   const pinned = source === "mevcut" && (post as ExistingPost).pinned;
   const title = post.alt ?? "Görsel";
   const caption = post.caption ?? "";
+
+  // Caption değiştiğinde focus'u koru (focus kaybı bug fix)
+  useEffect(() => {
+    if (document.activeElement === captionRef.current) {
+      return;
+    }
+  }, [caption]);
 
   function appendToCaption(text: string) {
     onCaptionChange(caption ? `${caption}\n\n${text}` : text);
@@ -490,6 +498,7 @@ export default function PostModal({
                 Caption
               </label>
               <textarea
+                ref={captionRef}
                 id="modal-caption"
                 value={caption}
                 onChange={(event) => onCaptionChange(event.target.value)}

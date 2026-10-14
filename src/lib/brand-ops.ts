@@ -5,7 +5,7 @@ import {
   type GridProject,
   type PersistedAppState,
 } from "./storage";
-import type { Brand, ExistingPost, Highlight, PlannedPost } from "./types";
+import type { Brand, ExistingPost, Highlight, PlannedPost, Story } from "./types";
 
 /**
  * §16: gönderi kopyalama seçenekleri. Görsel her zaman aktarılır;
@@ -148,6 +148,7 @@ export function createBrandState(
       pinned: false,
     })),
     plannedPosts: [],
+    stories: [],
   };
   const next: PersistedAppState = {
     ...current,
@@ -361,11 +362,13 @@ export function createProjectState(
         brand: synced.brand,
         existingPosts: previous.existingPosts,
         plannedPosts: previous.plannedPosts,
+        stories: previous.stories ?? [],
       }
     : {
         brand: { ...synced.brand, profileImageUrl: undefined },
         existingPosts: [],
         plannedPosts: [],
+        stories: [],
       };
   const timestamp = new Date().toISOString();
   const project: GridProject = {
@@ -390,6 +393,10 @@ export function createProjectState(
     plannedPosts: source.plannedPosts.map((post) => ({
       ...post,
       id: `planned-${timestamp}-${post.id}`,
+    })),
+    stories: source.stories.map((story) => ({
+      ...story,
+      id: `story-${timestamp}-${story.id}`,
     })),
   };
   const next = {

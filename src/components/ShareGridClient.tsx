@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { Brand, GridResult } from "@/lib/types";
+import type { Brand, GridResult, Story } from "@/lib/types";
 import GridPreview from "./GridPreview";
 import SharePostModal from "./SharePostModal";
 
@@ -14,9 +14,11 @@ import SharePostModal from "./SharePostModal";
 export default function ShareGridClient({
   brand,
   result,
+  stories,
 }: {
   brand: Brand;
   result: GridResult;
+  stories?: Story[];
 }) {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const selectedPost =
@@ -29,6 +31,7 @@ export default function ShareGridClient({
         result={result}
         onSelectPost={setSelectedPostId}
         selectedPostId={selectedPostId}
+        stories={stories}
       />
       {selectedPost ? (
         <SharePostModal

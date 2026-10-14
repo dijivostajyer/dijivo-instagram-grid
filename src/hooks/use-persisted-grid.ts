@@ -115,10 +115,6 @@ export async function hydrateState(
       ...highlight,
       imageUrl: await resolve(highlight.imageUrl),
     }))),
-    stories: await Promise.all((brand.stories ?? []).map(async (story) => ({
-      ...story,
-      mediaUrl: (await resolve(story.mediaUrl)) ?? story.mediaUrl,
-    }))),
   });
   const hydratedBrand = await hydrateBrand(state.brand);
 
@@ -166,6 +162,10 @@ export async function hydrateState(
     plannedPosts: (await Promise.all(project.plannedPosts.map((post) => hydratePost(post)))).filter(
       (post): post is PlannedPost => post !== null,
     ),
+    stories: await Promise.all((project.stories ?? []).map(async (story) => ({
+      ...story,
+      mediaUrl: (await resolve(story.mediaUrl)) ?? story.mediaUrl,
+    }))),
   })));
   const hydrated = {
     version: STORAGE_VERSION,
@@ -211,7 +211,7 @@ export interface PersistedGrid {
   /** Kalıcı veriyi siler ve temiz workspace'a (onboarding) döner. */
   resetToDefaults: () => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
-  /** Sadece seçilen Story kaydını ve ona ait workspace medyasını siler. */
+  /** Sadece seçilen Story kaydını ve ona ait workspace medyasını siler (ay bazlı). */
   deleteStory: (storyId: string) => Promise<void>;
   /** Aktif markaya ait projeler (sıkı marka izolasyonu, §5). */
   projects: GridProject[];
@@ -406,11 +406,6 @@ export function usePersistedGrid(): PersistedGrid {
           void persistUpload(url);
         }
       }
-      for (const story of next.stories ?? []) {
-        if (story.mediaUrl.startsWith("blob:") && !refByObjectUrl.current.has(story.mediaUrl)) {
-          void (story.mediaType === "video" ? persistVideoUpload(story.mediaUrl) : persistUpload(story.mediaUrl));
-        }
-      }
       const previousState = stateRef.current;
       // §7/§8/§11: marka düzenlemesi kayıt defterindeki ilgili
       // marka girişini günceller; aktif bağlam yalnızca aktif
@@ -424,7 +419,7 @@ export function usePersistedGrid(): PersistedGrid {
       });
       commit(nextState);
     },
-    [commit, persistUpload, persistVideoUpload],
+    [commit, persistUpload],
   );
 
   const setBrand = useCallback(
@@ -555,9 +550,9 @@ export function usePersistedGrid(): PersistedGrid {
   }, [commit]);
 
   const deleteStory = useCallback(async (storyId: string) => {
-    const currentBrand = (stateRef.current.brands ?? []).find((brand) => brand.id === stateRef.current.activeBrandId);
-    const story = currentBrand?.stories?.find((item) => item.id === storyId);
-    if (!currentBrand || !story) throw new Error("Story bulunamadı.");
+    const currentProject = (stateRef.current.projects ?? []).find((project) => project.id === stateRef.current.activeProjectId);
+    const story = currentProject?.stories?.find((item) => item.id === storyId);
+    if (!currentProject || !story) throw new Error("Story bulunamadı.");
     const db = getSupabaseBrowserClient();
     const { data: userData } = await db?.auth.getUser() ?? { data: { user: null } };
     if (!db || !userData.user) throw new Error("Story silmek için giriş yapın.");
@@ -567,8 +562,25 @@ export function usePersistedGrid(): PersistedGrid {
       const { error: mediaError } = await db.storage.from("workspace-media").remove([workspaceMediaPath(story.mediaUrl)]);
       if (mediaError) console.warn("[workspace] Story medyası silinemedi; kayıt silindi.", mediaError);
     }
-    updateBrand(currentBrand.id, { ...currentBrand, stories: (currentBrand.stories ?? []).filter((item) => item.id !== storyId).map((item, index) => ({ ...item, sortOrder: index })) });
-  }, [updateBrand]);
+    const next = {
+      ...stateRef.current,
+      projects: (stateRef.current.projects ?? []).map((project) =>
+        project.id === currentProject.id
+          ? { ...project, stories: (project.stories ?? []).filter((item) => item.id !== storyId).map((item, index) => ({ ...item, sortOrder: index })), updatedAt: new Date().toISOString() }
+          : project,
+      ),
+    };
+    // Aktif proje güncellendiyse üst düzey state'i de güncelle
+    if (stateRef.current.activeProjectId === currentProject.id) {
+      const updatedProject = next.projects.find((p) => p.id === currentProject.id);
+      if (updatedProject) {
+        next.brand = updatedProject.brand;
+        next.existingPosts = updatedProject.existingPosts;
+        next.plannedPosts = updatedProject.plannedPosts;
+      }
+    }
+    commit(next);
+  }, [commit]);
 
   const selectProject = useCallback(
     (id: string) => {
