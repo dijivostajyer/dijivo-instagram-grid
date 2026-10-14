@@ -28,7 +28,7 @@ import {
   shareInputFromGrid,
   type ShareSnapshotInput,
 } from "./share";
-import type { Brand, GridResult } from "./types";
+import type { Brand, GridResult, Story } from "./types";
 import { isWorkspaceMediaRef, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
 
 export interface ResolvedMedia {
@@ -198,6 +198,10 @@ export async function prepareShareInput(
     fetchImage?: typeof fetch;
     reader?: LocalMediaReader;
     posterMaker?: PosterMaker;
+    /** Faz 3: aktif aylık planın Story'leri ve geri bildirim ilişkisi. */
+    stories?: Story[];
+    brandId?: string;
+    projectId?: string;
   } = {},
 ): Promise<ShareSnapshotInput> {
   const fetchImage = options.fetchImage ?? fetch;
@@ -240,8 +244,13 @@ export async function prepareShareInput(
     return toDataUrl(media);
   };
 
-  const input = shareInputFromGrid(brand, result);
+  const input = shareInputFromGrid(brand, result, {
+    stories: options.stories,
+    brandId: options.brandId,
+    projectId: options.projectId,
+  });
   return {
+    ...input,
     brand: {
       ...input.brand,
       profileImageUrl: await materialize(input.brand.profileImageUrl, "image"),
@@ -267,6 +276,16 @@ export async function prepareShareInput(
         };
       }),
     ),
+    ...(input.stories
+      ? {
+          stories: await Promise.all(
+            input.stories.map(async (story) => ({
+              ...story,
+              mediaUrl: (await materialize(story.mediaUrl, story.mediaType)) ?? story.mediaUrl,
+            })),
+          ),
+        }
+      : {}),
   };
 }
 

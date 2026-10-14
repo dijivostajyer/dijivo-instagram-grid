@@ -191,3 +191,41 @@ describe("getShareStore seçimi", () => {
     expect(() => getShareStore({ NODE_ENV: "production" })).toThrow("Supabase paylaşım storage yapılandırması eksik.");
   });
 });
+
+describe("SupabaseShareStore — Faz 3 Story ve context", () => {
+  const withStories = (): ShareSnapshotInput => ({
+    ...input(),
+    stories: [
+      { id: "story-img", mediaType: "image", mediaUrl: `data:image/png;base64,${PNG}`, sortOrder: 0 },
+      { id: "story-vid", mediaType: "video", mediaUrl: `data:video/mp4;base64,${MP4}`, sortOrder: 1 },
+    ],
+    context: { brandId: "brand-a", projectId: "project-oct" },
+  });
+
+  it("Story görselini share-images, videosunu share-media'ya yükler; okurken imzalar", async () => {
+    const driver = fakeDriver();
+    const store = new SupabaseShareStore(driver, 30, () => TOKEN, now);
+    const created = await store.create(withStories());
+    expect(created.stories?.[0].mediaUrl.startsWith(`storage:shares/${TOKEN}/`)).toBe(true);
+    expect(created.stories?.[1].mediaUrl.startsWith(`storage:media/${TOKEN}/`)).toBe(true);
+    expect(created.stories?.[1].mediaUrl.endsWith(".mp4")).toBe(true);
+    expect(JSON.stringify(driver.rows.get(TOKEN)?.payload)).not.toContain("data:");
+    expect(driver.mediaUploads).toHaveLength(1);
+    const fetched = await store.get(TOKEN);
+    expect(fetched?.stories?.[0].mediaUrl).toContain("https://signed.test/shares/");
+    expect(fetched?.stories?.[1].mediaUrl).toContain("https://signed-media.test/media/");
+    expect(fetched?.context).toEqual({ brandId: "brand-a", projectId: "project-oct" });
+  });
+
+  it("peek medyayı imzalamadan geçerli snapshot döndürür; süresi dolmuşsa null", async () => {
+    const driver = fakeDriver();
+    let clock = now();
+    const store = new SupabaseShareStore(driver, 30, () => TOKEN, () => clock);
+    await store.create(withStories());
+    const peeked = await store.peek(TOKEN);
+    expect(peeked?.stories?.[0].mediaUrl).toContain("storage:shares/");
+    expect(peeked?.cells.map((cell) => cell.id)).toEqual(["a"]);
+    clock = new Date("2026-12-31T00:00:00.000Z");
+    expect(await store.peek(TOKEN)).toBeNull();
+  });
+});

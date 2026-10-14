@@ -6,7 +6,7 @@ import { ClipboardDocumentIcon, ShareIcon } from "@heroicons/react/16/solid";
 import { prepareShareInput } from "@/lib/share-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { withBasePath } from "@/lib/base-path";
-import type { Brand, GridResult } from "@/lib/types";
+import type { Brand, GridResult, Story } from "@/lib/types";
 
 /**
  * Paylaşım bağlantı durumu + aksiyonları. GridManager'da tek örnek olarak
@@ -38,7 +38,12 @@ function isErrorResponse(value: unknown): value is { error: string; code?: strin
  * Oluştur / kopyala / iptal akışını yönetir. API davranışı değişmedi:
  * POST /api/shares, DELETE /api/shares/[token].
  */
-export function useShareController(brand: Brand, result: GridResult): ShareController {
+export function useShareController(
+  brand: Brand,
+  result: GridResult,
+  /** Faz 3: aktif aylık planın Story'leri ve geri bildirim ilişkisi (sunucu doğrular). */
+  extras: { stories?: Story[]; brandId?: string; projectId?: string } = {},
+): ShareController {
   const [link, setLink] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -61,7 +66,11 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     setBusy(true);
     setMessage(null);
     try {
-      const input = await prepareShareInput(brand, result);
+      const input = await prepareShareInput(brand, result, {
+        stories: extras.stories,
+        brandId: extras.brandId,
+        projectId: extras.projectId,
+      });
       console.info("[share] İstemci payload hazır", {
         cells: input.cells.length,
         hasVideo: input.cells.some((cell) => Boolean(cell.videoUrl)),
@@ -83,7 +92,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
       console.info("[share] POST /api/shares başarılı", { requestId: isRecord(body) ? body.requestId : undefined });
       setLink(`${window.location.origin}${withBasePath(`/share/${body.token}`)}`);
       setToken(body.token);
-      setMessage("Salt-okunur paylaşım bağlantısı hazır.");
+      setMessage("Paylaşım bağlantısı hazır. Müşteri bu bağlantıdan onay verebilir veya revize isteyebilir.");
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Paylaşım bağlantısı oluşturulamadı.",
@@ -91,7 +100,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
     } finally {
       setBusy(false);
     }
-  }, [authHeaders, brand, result]);
+  }, [authHeaders, brand, result, extras.stories, extras.brandId, extras.projectId]);
 
   const revokeLink = useCallback(async () => {
     if (!token) return;
@@ -126,7 +135,7 @@ export function useShareController(brand: Brand, result: GridResult): ShareContr
 }
 
 /**
- * Salt-okunur paylaşım arayüzü: oluştur, kopyala, yeni sekmede aç, iptal et.
+ * Müşteri paylaşım arayüzü: oluştur, kopyala, yeni sekmede aç, iptal et.
  * Revokesuz auth modeli korunmuştur (capability-token).
  */
 export default function SharePanel({
@@ -141,7 +150,7 @@ export default function SharePanel({
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-neutral-900">Salt-okunur paylaşım</h2>
+      <h2 className="text-sm font-semibold text-neutral-900">Müşteri paylaşımı</h2>
       <p className="mb-4 mt-1 text-sm text-neutral-500">
         Bu anki gridin sabit bir kopyasını oluşturur. Sonraki düzenlemeler bu
         bağlantıdaki görünümü değiştirmez.

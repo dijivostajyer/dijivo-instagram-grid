@@ -13,6 +13,11 @@ import { getShareStorageConfig } from "./share-config";
 export interface ShareStore {
   create(input: ShareSnapshotInput): Promise<ShareSnapshot>;
   get(token: string): Promise<ShareSnapshot | null>;
+  /**
+   * Geçerli snapshot'ı medya URL'lerini çözmeden döndürür (geri bildirim
+   * hedef doğrulaması gibi yalnız kimlik gereken işlemler için).
+   */
+  peek(token: string): Promise<ShareSnapshot | null>;
   revoke(token: string): Promise<void>;
 }
 
@@ -34,6 +39,10 @@ export class InMemoryShareStore implements ShareStore {
   async get(token: string): Promise<ShareSnapshot | null> {
     if (!isValidShareToken(token)) return null;
     return deserializeShareSnapshot(this.records.get(token));
+  }
+
+  async peek(token: string): Promise<ShareSnapshot | null> {
+    return this.get(token);
   }
 
   async revoke(token: string): Promise<void> {

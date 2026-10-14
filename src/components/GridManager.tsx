@@ -412,7 +412,11 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   };
 
   // Bağlantı durumu kabukta tutulur: Paylaşım ekranından çıkınca kaybolmaz.
-  const shareController = useShareController(brand, grid);
+  const shareController = useShareController(brand, grid, {
+    stories: activeProject?.stories,
+    brandId: activeBrandId || undefined,
+    projectId: activeProjectId || undefined,
+  });
 
   useEffect(() => {
     if (!sidebarOpen) return;

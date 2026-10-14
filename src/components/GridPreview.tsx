@@ -8,8 +8,8 @@ import {
   VideoCameraIcon,
   Squares2X2Icon,
 } from "@heroicons/react/16/solid";
-import GridCellView, { type GridRenderArgs } from "./GridCellView";
-import StoryViewer from "./StoryViewer";
+import GridCellView, { type GridCellStatus, type GridRenderArgs } from "./GridCellView";
+import StoryViewer, { type StoryFooterControls } from "./StoryViewer";
 
 import type { Brand, GridResult, Story } from "@/lib/types";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/lib/ig-preview-theme";
 
 type PreviewTab = "post" | "reels";
+type StoryViewerFooter = (story: Story, controls: StoryFooterControls) => ReactNode;
 
 const tabLabels: Record<PreviewTab, string> = {
   post: "POST",
@@ -36,6 +37,8 @@ export default function GridPreview({
   selectedPostId,
   stories,
   renderGrid,
+  renderStoryFooter,
+  cellStatus,
 }: {
   brand: Brand;
   result: GridResult;
@@ -48,6 +51,10 @@ export default function GridPreview({
    * SortableGrid'i verir. Share vermez ve dnd-kit hiç yüklenmez.
    */
   renderGrid?: (args: GridRenderArgs) => ReactNode;
+  /** Paylaşım ekranı: Story görüntüleyicide aktif Story için geri bildirim alanı. */
+  renderStoryFooter?: StoryViewerFooter;
+  /** Paylaşım ekranı: hücrenin son geri bildirim durumu (rozet). */
+  cellStatus?: (cell: GridResult["cells"][number]) => GridCellStatus | undefined;
 }) {
   const [theme, toggleTheme] = useInstagramPreviewTheme();
   const dark = theme === "dark";
@@ -194,7 +201,7 @@ export default function GridPreview({
           ))}
         </div>
       ) : null}
-      {storyOpen ? <StoryViewer brand={brand} stories={activeStories} onClose={() => setStoryOpen(false)} /> : null}
+      {storyOpen ? <StoryViewer brand={brand} stories={activeStories} onClose={() => setStoryOpen(false)} footer={renderStoryFooter} /> : null}
 
       {/* Post / Reels sekmeleri (§14) */}
       <div
@@ -248,6 +255,7 @@ export default function GridPreview({
             onError: onImageError,
             onSelect: onSelectPost,
             selected: selectedPostId === cell.post.id,
+            feedbackStatus: cellStatus?.(cell),
           }),
         })
       ) : visibleCells.length ? (
@@ -260,6 +268,7 @@ export default function GridPreview({
               onError={onImageError}
               onSelect={onSelectPost}
               selected={selectedPostId === cell.post.id}
+              feedbackStatus={cellStatus?.(cell)}
             />
           ))}
         </div>

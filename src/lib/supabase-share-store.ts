@@ -112,6 +112,14 @@ export class SupabaseShareStore implements ShareStore {
     return snapshot ? this.resolveStorageImages(snapshot) : null;
   }
 
+  /** Geçerli (süresi dolmamış, iptal edilmemiş) snapshot; medya imzalanmaz. */
+  async peek(token: string): Promise<ShareSnapshot | null> {
+    if (!isValidShareToken(token)) return null;
+    const row = await this.driver.find(token);
+    if (!row || row.revoked_at || Date.parse(row.expires_at) <= this.now().getTime()) return null;
+    return deserializeShareSnapshot(JSON.stringify(row.payload));
+  }
+
   async revoke(token: string): Promise<void> {
     if (!isValidShareToken(token)) return;
     await this.driver.revoke(token, this.now().toISOString());
@@ -181,12 +189,19 @@ export class SupabaseShareStore implements ShareStore {
       cells.push({ ...cell, imageUrl: await convertImage(cell.imageUrl), videoUrl, coverImageUrl });
     }
     const brandConverters = makeConverters(new Map<string, string>());
+    const stories = [];
+    for (const story of input.stories ?? []) {
+      const { convertImage, convertVideo } = makeConverters(new Map<string, string>());
+      stories.push({ ...story, mediaUrl: story.mediaType === "video" ? await convertVideo(story.mediaUrl) : await convertImage(story.mediaUrl) });
+    }
     return {
+      ...input,
       brand: {
         ...input.brand,
         profileImageUrl: input.brand.profileImageUrl ? await brandConverters.convertImage(input.brand.profileImageUrl) : undefined,
       },
       cells,
+      ...(input.stories ? { stories } : {}),
     };
   }
 
@@ -208,6 +223,14 @@ export class SupabaseShareStore implements ShareStore {
         videoUrl: await resolveVideo(cell.videoUrl),
         coverImageUrl: cell.coverImageUrl === undefined ? undefined : await resolveImage(cell.coverImageUrl),
       }))),
+      ...(snapshot.stories
+        ? {
+            stories: await Promise.all(snapshot.stories.map(async (story) => ({
+              ...story,
+              mediaUrl: story.mediaType === "video" ? (await resolveVideo(story.mediaUrl)) ?? story.mediaUrl : await resolveImage(story.mediaUrl),
+            }))),
+          }
+        : {}),
     };
   }
 }

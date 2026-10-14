@@ -1,7 +1,32 @@
 import ShareGridClient from "@/components/ShareGridClient";
+import type { ShareSnapshot } from "@/lib/share";
+import { latestFeedbackByTarget, toPublicFeedback, type PublicFeedbackRecord } from "@/lib/share-feedback";
+import { getShareFeedbackStore } from "@/lib/share-feedback-store";
 import { isValidShareToken } from "@/lib/share-token";
 import { getShareStore } from "@/lib/share-store";
-import type { GridResult } from "@/lib/types";
+import type { GridResult, Story } from "@/lib/types";
+
+/** Her hedefin son geri bildirimi; tablo henüz yoksa sayfa yine açılır. */
+async function initialFeedback(token: string): Promise<PublicFeedbackRecord[]> {
+  try {
+    const records = await getShareFeedbackStore().list(token);
+    return [...latestFeedbackByTarget(records).values()].map(toPublicFeedback);
+  } catch (error) {
+    console.error("[share-feedback]", { step: "initial_list", error: error instanceof Error ? error.message : "bilinmeyen hata" });
+    return [];
+  }
+}
+
+function storiesFromSnapshot(snapshot: ShareSnapshot): Story[] {
+  return (snapshot.stories ?? []).map((story) => ({
+    id: story.id,
+    mediaType: story.mediaType,
+    mediaUrl: story.mediaUrl,
+    sortOrder: story.sortOrder,
+    createdAt: story.createdAt ?? snapshot.createdAt,
+    expiresAt: story.expiresAt,
+  }));
+}
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +43,15 @@ export default async function SharePage({
     return (
       <main className="mx-auto max-w-2xl px-4 py-8">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-neutral-500">
-          Salt-okunur grid paylaşımı
+          Grid önizleme ve onay
         </p>
+        {/* context (marka/plan kimlikleri) bilerek istemciye verilmez. */}
         <ShareGridClient
           brand={{ id: "shared-brand", ...snapshot.brand }}
           result={gridResultFromSnapshot(snapshot.cells)}
+          stories={storiesFromSnapshot(snapshot)}
+          token={token}
+          initialFeedback={await initialFeedback(token)}
         />
       </main>
     );

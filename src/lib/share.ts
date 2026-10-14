@@ -1,4 +1,4 @@
-import type { Brand, GridResult, PostSource, PostType, Highlight } from "./types";
+import type { Brand, GridResult, PostSource, PostType, Highlight, Story } from "./types";
 import { isValidShareToken } from "./share-token";
 import { isHttpUrl, isInstagramPostUrl, isPlayableVideoUrl } from "./reel-media";
 
@@ -44,9 +44,36 @@ export interface ShareGridCell {
   externalUrl?: string;
 }
 
+/** Paylaşılan aylık planın Story'si (9:16). Medya taşınabilir URL olmalı. */
+export interface ShareStory {
+  id: string;
+  mediaType: "image" | "video";
+  mediaUrl: string;
+  sortOrder: number;
+  createdAt?: string;
+  expiresAt?: string;
+}
+
+/**
+ * Paylaşımın ait olduğu marka/aylık plan. Server, snapshot oluştururken
+ * bunların oturumdaki kullanıcıya ait olduğunu doğrular; geri bildirim
+ * kayıtları buradan ilişkilendirilir. İstemci tarafına gösterilmez.
+ */
+export interface ShareContext {
+  brandId?: string;
+  projectId?: string;
+}
+
+export const MAX_SHARE_STORIES = 30;
+const MAX_SHARE_ID_LENGTH = 200;
+
 export interface ShareSnapshotInput {
   brand: ShareBrand;
   cells: ShareGridCell[];
+  /** Faz 3: Story geri bildirimi için; eski paylaşımlarda yok. */
+  stories?: ShareStory[];
+  /** Faz 3: geri bildirimin marka/plan ilişkisi; eski paylaşımlarda yok. */
+  context?: ShareContext;
 }
 
 export interface ShareSnapshot extends ShareSnapshotInput {
@@ -137,6 +164,34 @@ function isShareGridCell(value: unknown, allowWorkspaceMedia: boolean): value is
   );
 }
 
+function isShareId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_SHARE_ID_LENGTH;
+}
+
+function isShareStory(value: unknown, allowWorkspaceMedia: boolean): value is ShareStory {
+  if (!isRecord(value) || !isShareId(value.id) || typeof value.mediaUrl !== "string") return false;
+  const mediaOk = value.mediaType === "video"
+    ? isShareableVideoUrl(value.mediaUrl, allowWorkspaceMedia)
+    : value.mediaType === "image" && isShareableImageUrl(value.mediaUrl, allowWorkspaceMedia);
+  return (
+    mediaOk &&
+    typeof value.sortOrder === "number" && Number.isFinite(value.sortOrder) &&
+    isOptionalString(value.createdAt) &&
+    isOptionalString(value.expiresAt)
+  );
+}
+
+function parseShareContext(value: unknown): ShareContext | null | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
+  if (value.brandId !== undefined && !isShareId(value.brandId)) return null;
+  if (value.projectId !== undefined && !isShareId(value.projectId)) return null;
+  const context: ShareContext = {};
+  if (typeof value.brandId === "string") context.brandId = value.brandId;
+  if (typeof value.projectId === "string") context.projectId = value.projectId;
+  return context;
+}
+
 function validateShareInput(value: unknown, allowWorkspaceMedia: boolean): ShareSnapshotInput | null {
   if (!isRecord(value) || !isShareBrand(value.brand, allowWorkspaceMedia) || !Array.isArray(value.cells)) {
     return null;
@@ -147,7 +202,27 @@ function validateShareInput(value: unknown, allowWorkspaceMedia: boolean): Share
     cells.push({ ...cell, postType: cell.postType ?? "post" });
   }
   if (cells.length === 0 || cells.length > MAX_SHARE_CELLS) return null;
-  return { brand: { ...value.brand }, cells };
+  const input: ShareSnapshotInput = { brand: { ...value.brand }, cells };
+  if (value.stories !== undefined) {
+    if (!Array.isArray(value.stories) || value.stories.length > MAX_SHARE_STORIES) return null;
+    const stories: ShareStory[] = [];
+    for (const story of value.stories) {
+      if (!isShareStory(story, allowWorkspaceMedia)) return null;
+      stories.push({
+        id: story.id,
+        mediaType: story.mediaType,
+        mediaUrl: story.mediaUrl,
+        sortOrder: story.sortOrder,
+        ...(story.createdAt !== undefined ? { createdAt: story.createdAt } : {}),
+        ...(story.expiresAt !== undefined ? { expiresAt: story.expiresAt } : {}),
+      });
+    }
+    if (stories.length > 0) input.stories = stories;
+  }
+  const context = parseShareContext(value.context);
+  if (context === null) return null;
+  if (context && (context.brandId || context.projectId)) input.context = context;
+  return input;
 }
 
 /** İstemciden gelen taslak, server kopyalamadan önce workspace-media ref içerebilir. */
@@ -201,8 +276,7 @@ export function createShareSnapshot(
     version: SHARE_SNAPSHOT_VERSION,
     token,
     createdAt,
-    brand: validated.brand,
-    cells: validated.cells,
+    ...validated,
   };
 }
 
@@ -230,14 +304,34 @@ export function deserializeShareSnapshot(json: string | null | undefined): Share
     version: SHARE_SNAPSHOT_VERSION,
     token: value.token,
     createdAt: value.createdAt,
-    brand: input.brand,
-    cells: input.cells,
+    ...input,
   };
 }
 
 /** Editörde görülen, hesaplanmış grid sırasını snapshot girdisine dönüştürür. */
-export function shareInputFromGrid(brand: Brand, result: GridResult): ShareSnapshotInput {
+export function shareInputFromGrid(
+  brand: Brand,
+  result: GridResult,
+  extras: { stories?: Story[]; brandId?: string; projectId?: string } = {},
+): ShareSnapshotInput {
+  const stories = (extras.stories ?? [])
+    .filter((story) => !story.expiresAt || Date.parse(story.expiresAt) > Date.now())
+    .slice(0, MAX_SHARE_STORIES)
+    .map((story): ShareStory => ({
+      id: story.id,
+      mediaType: story.mediaType,
+      mediaUrl: story.mediaUrl,
+      sortOrder: story.sortOrder,
+      createdAt: story.createdAt,
+      ...(story.expiresAt ? { expiresAt: story.expiresAt } : {}),
+    }));
+  const context: ShareContext = {
+    ...(extras.brandId ? { brandId: extras.brandId } : {}),
+    ...(extras.projectId ? { projectId: extras.projectId } : {}),
+  };
   return {
+    ...(stories.length ? { stories } : {}),
+    ...(context.brandId || context.projectId ? { context } : {}),
     brand: {
       name: brand.name,
       username: brand.username,

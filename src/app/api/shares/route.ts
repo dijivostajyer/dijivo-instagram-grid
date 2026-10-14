@@ -50,6 +50,7 @@ async function copyWorkspaceMediaReferences(input: import("@/lib/share").ShareSn
     return `data:${data.type || contentType(path, kind)};base64,${bytes}`;
   };
   return {
+    ...input,
     brand: {
       ...input.brand,
       profileImageUrl: await copy(input.brand.profileImageUrl, "image"),
@@ -61,7 +62,48 @@ async function copyWorkspaceMediaReferences(input: import("@/lib/share").ShareSn
       videoUrl: await copy(cell.videoUrl, "video"),
       coverImageUrl: await copy(cell.coverImageUrl, "image"),
     }))),
+    ...(input.stories
+      ? {
+          stories: await Promise.all(input.stories.map(async (story) => ({
+            ...story,
+            mediaUrl: (await copy(story.mediaUrl, story.mediaType)) ?? story.mediaUrl,
+          }))),
+        }
+      : {}),
   };
+}
+
+/**
+ * Geri bildirim kayıtları snapshot'taki marka/plan ile ilişkilendirilir.
+ * İstemcinin gönderdiği kimliklere güvenilmez: yalnız oturumdaki
+ * kullanıcıya ait marka ve o markanın planı kabul edilir; doğrulanamayan
+ * ilişki sessizce düşülür (paylaşım yine oluşturulur, geri bildirim
+ * markasız kaydedilir).
+ */
+async function verifyShareContext(
+  input: import("@/lib/share").ShareSnapshotInput,
+  userId: string,
+): Promise<import("@/lib/share").ShareSnapshotInput> {
+  const { context, ...rest } = input;
+  if (!context?.brandId) return rest;
+  const url = process.env.SUPABASE_URL?.trim();
+  const secret = process.env.SUPABASE_SECRET_KEY?.trim();
+  if (!url || !secret) return rest;
+  const client = createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: brand, error: brandError } = await client
+    .from("workspace_brands").select("id").eq("id", context.brandId).eq("user_id", userId).maybeSingle();
+  if (brandError || !brand) {
+    console.warn("[share] context markası doğrulanamadı; ilişki düşüldü", { brandError: brandError?.message });
+    return rest;
+  }
+  if (!context.projectId) return { ...rest, context: { brandId: context.brandId } };
+  const { data: project, error: projectError } = await client
+    .from("workspace_projects").select("id").eq("id", context.projectId).eq("brand_id", context.brandId).eq("user_id", userId).maybeSingle();
+  if (projectError || !project) {
+    console.warn("[share] context planı doğrulanamadı; yalnız marka ilişkisi tutuldu", { projectError: projectError?.message });
+    return { ...rest, context: { brandId: context.brandId } };
+  }
+  return { ...rest, context: { brandId: context.brandId, projectId: context.projectId } };
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -93,9 +135,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
-    const portableInput = await copyWorkspaceMediaReferences(input, authentication.userId);
+    const portableInput = await copyWorkspaceMediaReferences(
+      await verifyShareContext(input, authentication.userId),
+      authentication.userId,
+    );
     if (!validateShareSnapshotInput(portableInput)) throw new Error(`Share medya dönüşümü geçersiz: ${describeInvalidShareInput(portableInput)}`);
-    console.info("[share] POST payload doğrulandı", { requestId, cells: portableInput.cells.length, bodyBytes, hasVideo: portableInput.cells.some((cell) => Boolean(cell.videoUrl)) });
+    console.info("[share] POST payload doğrulandı", { requestId, cells: portableInput.cells.length, bodyBytes, hasVideo: portableInput.cells.some((cell) => Boolean(cell.videoUrl)), stories: portableInput.stories?.length ?? 0, hasContext: Boolean(portableInput.context) });
     const snapshot = await getShareStore().create(portableInput);
     console.info("[share] Snapshot oluşturuldu", { requestId, token: snapshot.token, cells: input.cells.length });
     return NextResponse.json({ token: snapshot.token, requestId }, { status: 201 });

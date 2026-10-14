@@ -370,3 +370,48 @@ describe("in-memory ShareStore adapter", () => {
     expect(restored?.cells[0].imageUrl).toBe("https://example.com/post-1.jpg");
   });
 });
+
+describe("Faz 3: snapshot Story ve context", () => {
+  const baseInput = () => ({
+    brand: { name: "Marka", username: "marka" },
+    cells: [{ id: "c1", source: "mevcut" as const, imageUrl: "https://cdn.test/c1.jpg", position: 0, row: 0, column: 0, pinned: false }],
+  });
+
+  it("Story ve context roundtrip ile korunur; eski snapshot'larda alanlar yoktur", () => {
+    const snapshot = createShareSnapshot({
+      ...baseInput(),
+      stories: [{ id: "s1", mediaType: "video", mediaUrl: "https://cdn.test/s1.mp4", sortOrder: 0, createdAt: "2026-10-01T00:00:00.000Z" }],
+      context: { brandId: "brand-a", projectId: "p-oct" },
+    }, "3e1a1c76-7958-4d4f-86c6-2727195fd44c", "2026-10-14T00:00:00.000Z");
+    const restored = deserializeShareSnapshot(serializeShareSnapshot(snapshot));
+    expect(restored?.stories).toEqual([{ id: "s1", mediaType: "video", mediaUrl: "https://cdn.test/s1.mp4", sortOrder: 0, createdAt: "2026-10-01T00:00:00.000Z" }]);
+    expect(restored?.context).toEqual({ brandId: "brand-a", projectId: "p-oct" });
+    const legacy = createShareSnapshot(baseInput(), "3e1a1c76-7958-4d4f-86c6-2727195fd44c", "2026-10-14T00:00:00.000Z");
+    expect(legacy).not.toHaveProperty("stories");
+    expect(legacy).not.toHaveProperty("context");
+  });
+
+  it("taşınamaz Story medyası ve bozuk context reddedilir", () => {
+    expect(validateShareSnapshotInput({ ...baseInput(), stories: [{ id: "s1", mediaType: "image", mediaUrl: "blob:https://app.test/x", sortOrder: 0 }] })).toBeNull();
+    expect(validateShareSnapshotInput({ ...baseInput(), stories: [{ id: "s1", mediaType: "image", mediaUrl: "https://cdn.test/a.mp4#", sortOrder: "x" }] })).toBeNull();
+    expect(validateShareSnapshotInput({ ...baseInput(), stories: [{ id: "s1", mediaType: "audio", mediaUrl: "https://cdn.test/a.mp3", sortOrder: 0 }] })).toBeNull();
+    expect(validateShareSnapshotInput({ ...baseInput(), context: { brandId: 42 } })).toBeNull();
+    expect(validateShareSnapshotInput({ ...baseInput(), context: "brand-a" })).toBeNull();
+    expect(validateShareCreateInput({ ...baseInput(), stories: [{ id: "s1", mediaType: "image", mediaUrl: "storage:workspace-media/00000000-0000-4000-8000-000000000000/b/story/a.jpg", sortOrder: 0 }] })).not.toBeNull();
+  });
+
+  it("shareInputFromGrid aktif Story'leri ve ilişkiyi ekler; süresi dolan Story'yi almaz", () => {
+    const grid = computeGrid([{ id: "c1", source: "mevcut", imageUrl: "https://cdn.test/c1.jpg", recencyIndex: 0, pinned: false }], []);
+    const input = shareInputFromGrid({ id: "brand-a", name: "Marka", username: "marka" }, grid, {
+      stories: [
+        { id: "s-live", mediaType: "image", mediaUrl: "https://cdn.test/s.jpg", sortOrder: 0, createdAt: "2026-10-01T00:00:00.000Z" },
+        { id: "s-old", mediaType: "image", mediaUrl: "https://cdn.test/o.jpg", sortOrder: 1, createdAt: "2026-09-01T00:00:00.000Z", expiresAt: "2020-01-01T00:00:00.000Z" },
+      ],
+      brandId: "brand-a",
+      projectId: "p-oct",
+    });
+    expect(input.stories?.map((story) => story.id)).toEqual(["s-live"]);
+    expect(input.context).toEqual({ brandId: "brand-a", projectId: "p-oct" });
+    expect(shareInputFromGrid({ id: "b", name: "M", username: "m" }, grid)).not.toHaveProperty("stories");
+  });
+});

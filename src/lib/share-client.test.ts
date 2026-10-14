@@ -278,3 +278,26 @@ describe("prepareShareInput — cross-device workspace medyası", () => {
     expect(input.cells[0].imageUrl).toBe("storage:workspace-media/123e4567-e89b-42d3-a456-426614174000/brand/post.png");
   });
 });
+
+describe("prepareShareInput — Faz 3 Story ve ilişki", () => {
+  it("Story medyasını taşınabilir yapar, workspace-media'yı kısa ref olarak gönderir ve ilişkiyi ekler", async () => {
+    const restore = stubBtoa();
+    try {
+      const input = await prepareShareInput(BRAND, computeGrid(EXISTING, PLANNED), {
+        reader: readerFor({ "blob:https://app.test/story-video": { bytes: MP4, mime: "video/mp4" } }),
+        stories: [
+          { id: "s1", mediaType: "video", mediaUrl: "blob:https://app.test/story-video", sortOrder: 0, createdAt: "2026-10-01T00:00:00.000Z" },
+          { id: "s2", mediaType: "image", mediaUrl: "https://proj.supabase.co/storage/v1/object/sign/workspace-media/00000000-0000-4000-8000-000000000000/brand-1/story/a.jpg?token=t", sortOrder: 1, createdAt: "2026-10-01T00:00:00.000Z" },
+        ],
+        brandId: "brand-1",
+        projectId: "project-oct",
+      });
+      expect(input.stories?.[0].mediaUrl).toBe(`data:video/mp4;base64,${b64(MP4)}`);
+      expect(input.stories?.[1].mediaUrl).toBe("storage:workspace-media/00000000-0000-4000-8000-000000000000/brand-1/story/a.jpg");
+      expect(input.context).toEqual({ brandId: "brand-1", projectId: "project-oct" });
+      expect(findLocalMediaRefs(input)).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+});

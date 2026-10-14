@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 import {
   BookmarkIcon,
+  CheckIcon,
   ClockIcon,
+  PencilSquareIcon,
   PlayIcon,
   RectangleStackIcon,
 } from "@heroicons/react/16/solid";
@@ -22,7 +24,11 @@ export interface GridCellViewProps {
   onError?: (id: string) => void;
   onSelect?: (id: string) => void;
   selected?: boolean;
+  /** Paylaşım ekranında müşterinin son geri bildirimi (rozet). */
+  feedbackStatus?: GridCellStatus;
 }
+
+export type GridCellStatus = "approved" | "revision_requested";
 
 /** Hücre listesini çizen bileşene (salt-okunur veya SortableGrid) verilen argümanlar. */
 export interface GridRenderArgs {
@@ -48,13 +54,9 @@ export default function GridCellView({
   onError,
   onSelect,
   selected,
+  feedbackStatus,
   drag,
-}: {
-  cell: GridResult["cells"][number];
-  dark: boolean;
-  onError?: (id: string) => void;
-  onSelect?: (id: string) => void;
-  selected?: boolean;
+}: GridCellViewProps & {
   drag?: GridCellDragProps;
 }) {
   const { post, pinned } = cell;
@@ -144,6 +146,15 @@ export default function GridCellView({
           title="Sabitlenmiş gönderi"
         >
           <BookmarkIcon className="size-3.5" aria-hidden="true" />
+        </span>
+      ) : null}
+      {feedbackStatus ? (
+        <span
+          className={`absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium text-white shadow-sm ${feedbackStatus === "approved" ? "bg-emerald-600" : "bg-amber-600"}`}
+          data-testid="feedback-badge"
+        >
+          {feedbackStatus === "approved" ? <CheckIcon className="size-3" aria-hidden="true" /> : <PencilSquareIcon className="size-3" aria-hidden="true" />}
+          {feedbackStatus === "approved" ? "Onaylandı" : "Revize"}
         </span>
       ) : null}
       {post.source === "planlanan" ? (

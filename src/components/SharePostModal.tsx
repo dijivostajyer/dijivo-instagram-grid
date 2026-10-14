@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookmarkIcon,
   ChatBubbleOvalLeftIcon,
@@ -30,11 +30,14 @@ export default function SharePostModal({
   post,
   brand,
   onClose,
+  footer,
 }: {
   post: ExistingPost | PlannedPost;
   /** Modal başlığı için marka kimliği (avatar + @username). */
   brand: Pick<Brand, "name" | "username" | "profileImageUrl">;
   onClose: () => void;
+  /** Faz 3: müşteri onay / revize alanı (yan panelin altında). */
+  footer?: ReactNode;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -67,7 +70,9 @@ export default function SharePostModal({
   useEffect(() => {
     closeRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") handleClose();
+      // Revize mesajı yazılırken ESC modalı kapatıp metni kaybettirmesin.
+      const typing = event.target instanceof HTMLElement && Boolean(event.target.closest("input, textarea, select"));
+      if (event.key === "Escape" && !typing) handleClose();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
@@ -162,6 +167,14 @@ export default function SharePostModal({
           <div
             className={`flex flex-col gap-3 p-4 ${dark ? "text-neutral-100" : "text-neutral-900"}`}
           >
+            <div className="flex flex-wrap items-center gap-1.5" aria-label="İçerik bilgisi">
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${dark ? "bg-neutral-800 text-neutral-200" : "bg-neutral-100 text-neutral-700"}`}>
+                {post.postType === "reel" ? "Reel" : post.postType === "carousel" ? "Carousel" : "Post"}
+              </span>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${post.source === "planlanan" ? "bg-sky-50 text-sky-800" : dark ? "bg-neutral-800 text-neutral-300" : "bg-neutral-100 text-neutral-600"}`}>
+                {post.source === "planlanan" ? "Planlanan içerik" : "Yayındaki içerik"}
+              </span>
+            </div>
             <div className="flex items-center gap-3">
               <HeartIcon className="size-6" aria-hidden="true" />
               <ChatBubbleOvalLeftIcon className="size-6" aria-hidden="true" />
@@ -206,6 +219,9 @@ export default function SharePostModal({
                   </a>
                 ) : null}
               </div>
+            ) : null}
+            {footer ? (
+              <div className={`mt-auto border-t pt-4 ${dark ? "border-neutral-800" : "border-slate-100"}`}>{footer}</div>
             ) : null}
           </div>
         </div>

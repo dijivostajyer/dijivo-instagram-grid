@@ -4,7 +4,7 @@ import SharePanel, { type ShareController } from "@/components/SharePanel";
 import type { GridResult } from "@/lib/types";
 
 /**
- * Salt-okunur paylaşım sayfası. Oluştur/kopyala/aç/iptal akışı SharePanel'dedir;
+ * Müşteri paylaşım sayfası. Oluştur/kopyala/aç/iptal akışı SharePanel'dedir;
  * bağlantı durumu controller ile üst bileşende tutulur (sayfa değişiminde kaybolmaz).
  */
 export default function ShareWorkspace({
@@ -17,8 +17,8 @@ export default function ShareWorkspace({
   return (
     <div className="mx-auto max-w-[760px]">
       <p className="mb-6 text-sm text-neutral-500">
-        Anlık gridin sabit kopyasını oluşturup müşteriye gönderin. Alıcı yalnızca görüntüler;
-        düzenleme, silme veya yükleme yapamaz.
+        Anlık gridin sabit kopyasını oluşturup müşteriye gönderin. Müşteri içerikleri
+        düzenleyemez; her Post, Reel, Story ve tüm grid için onay verebilir veya revize isteyebilir.
       </p>
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6">
@@ -30,6 +30,8 @@ export default function ShareWorkspace({
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-600">
           <li>Bağlantı, oluşturduğu andaki gridin kopyasını açar; sonraki düzenlemeleri etkilemez.</li>
           <li>Bağlantı token’ı bilen herkes açar; ek yetkilendirme yoktur (bilinçli sınırlama).</li>
+          <li>Bağlantı oluşturulduğu ayın Story'lerini de içerir.</li>
+          <li>Müşteri geri bildirimleri tarih ve saatiyle kaydedilir; önceki kayıtlar silinmez.</li>
           <li>“Bağlantıyı kaldır” ile bağlantı anında geçersizleşir.</li>
           <li>Bağlantılar üretim ortamında Supabase’de saklanır (varsayılan 30 gün).</li>
         </ul>
