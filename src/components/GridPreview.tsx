@@ -1,39 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
+import { useState, type ReactNode } from "react";
 import {
-  DndContext,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type Announcements,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  rectSortingStrategy,
-  sortableKeyboardCoordinates,
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
-  BookmarkIcon,
-  ClockIcon,
   GlobeAltIcon,
   MoonIcon,
-  PlayIcon,
-  RectangleStackIcon,
   SunIcon,
   VideoCameraIcon,
   Squares2X2Icon,
 } from "@heroicons/react/16/solid";
+import GridCellView, { type GridRenderArgs } from "./GridCellView";
 import StoryViewer from "./StoryViewer";
 
 import type { Brand, GridResult, Story } from "@/lib/types";
-import { gridCellAspectClass, gridCellMediaSrc } from "@/lib/grid-ratio";
-import { canDropInGridZone, gridCellZone, type GridZone } from "@/lib/grid-reorder";
-import { SafeKeyboardSensor, SafePointerSensor, SafeTouchSensor, zoneCollisionDetection } from "@/lib/dnd-sensors";
 import {
   useInstagramPreviewTheme,
   type IgPreviewTheme,
@@ -50,279 +28,6 @@ function formatCount(value: number): string {
   return value.toLocaleString("tr-TR");
 }
 
-/** Sürüklenebilir hücreye bağlanan dnd-kit özellikleri (salt-okunur gridde yok). */
-interface GridCellDragProps {
-  ref: (node: HTMLElement | null) => void;
-  style: CSSProperties;
-  attributes: HTMLAttributes<HTMLElement>;
-  listeners: HTMLAttributes<HTMLElement> | undefined;
-  isDragging: boolean;
-  /** Sürükleme sürerken bu hücreye bırakılamaz (farklı bölge). */
-  blocked: boolean;
-}
-
-function GridCellView({
-  cell,
-  dark,
-  onError,
-  onSelect,
-  selected,
-  drag,
-}: {
-  cell: GridResult["cells"][number];
-  dark: boolean;
-  onError?: (id: string) => void;
-  onSelect?: (id: string) => void;
-  selected?: boolean;
-  drag?: GridCellDragProps;
-}) {
-  const { post, pinned } = cell;
-  // Reel: kapak görseli varsa onu göster; yoksa ana görsel
-  // (güvenli fallback — eski reel kayıtları bozulmaz, §4). Export da aynı
-  // helper'ı kullanır.
-  const mediaSrc = gridCellMediaSrc(post);
-  const [status, setStatus] = useState<"loading" | "loaded" | "error">(
-    "loading",
-  );
-  const imgRef = useRef<HTMLImageElement>(null);
-
-  // Önbellekten gelen görseller React onLoad bağlanmadan yüklenmiş olabilir;
-  // mount sonrası complete durumunu kontrol et.
-  useEffect(() => {
-    const img = imgRef.current;
-    if (!img || !img.complete) return;
-    setStatus(img.naturalWidth > 0 ? "loaded" : "error");
-  }, []);
-
-  const placeholderBg = dark ? "bg-neutral-900" : "bg-neutral-100";
-  const ringTheme = dark ? "hover:ring-white/25" : "hover:ring-black/20";
-
-  // Sürükleme geri bildirimi: taşınan kart yükselir; farklı bölgedeki
-  // (bırakılamaz) kartlar soluklaşır.
-  const dragClass = drag?.isDragging
-    ? "z-20 scale-[1.04] cursor-grabbing opacity-90 shadow-2xl ring-2 ring-inset ring-sky-600"
-    : drag?.blocked
-      ? "cursor-not-allowed opacity-40 grayscale"
-      : drag
-        ? "cursor-grab"
-        : "";
-
-  return (
-    <button
-      type="button"
-      {...drag?.attributes}
-      {...drag?.listeners}
-      ref={drag?.ref}
-      style={drag?.style}
-      // Sürüklenebilir kartta Space klavyeyle taşır; tarayıcının Space
-      // keyup'ında ürettiği tıklama modalı açmasın (Enter açmaya devam eder).
-      onKeyUp={drag ? (event) => { if (event.code === "Space") event.preventDefault(); } : undefined}
-      onClick={() => onSelect?.(post.id)}
-      aria-label={`${post.alt}${selected ? ", seçili" : ""}`}
-      className={`group relative ${gridCellAspectClass(post.postType)} touch-manipulation overflow-hidden text-left outline-none transition duration-200 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-600 ${
-        selected
-          ? "ring-2 ring-inset ring-sky-600"
-          : `hover:z-10 hover:ring-2 hover:ring-inset ${ringTheme}`
-      } ${dragClass}`}
-    >
-      {status === "loading" ? (
-        <div
-          className={`absolute inset-0 flex items-center justify-center ${placeholderBg}`}
-        >
-          <span className={`text-xs ${dark ? "text-neutral-500" : "text-neutral-400"}`}>
-            Yükleniyor…
-          </span>
-        </div>
-      ) : null}
-      {status === "error" ? (
-        <div
-          className={`absolute inset-0 flex items-center justify-center ${placeholderBg} p-2 text-center`}
-        >
-          <span className="text-xs text-red-500">Görsel yüklenemedi</span>
-        </div>
-      ) : null}
-      {/* Hücre oranında (Post 3:4, Reel 2:3) object-cover ile merkezden kırpılır; orijinal dosya değişmez */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        ref={imgRef}
-        src={mediaSrc}
-        alt={post.alt ?? "Gönderi görseli"}
-        className={`h-full w-full object-cover transition-opacity duration-200 ${
-          status === "loaded" ? "opacity-100" : "opacity-0"
-        }`}
-        loading="lazy"
-        onLoad={() => setStatus("loaded")}
-        onError={() => {
-          setStatus("error");
-          onError?.(post.id);
-        }}
-      />
-      {pinned ? (
-        <span
-          className="absolute left-2 top-2 inline-flex size-6 items-center justify-center rounded-full bg-black/70 text-white"
-          title="Sabitlenmiş gönderi"
-        >
-          <BookmarkIcon className="size-3.5" aria-hidden="true" />
-        </span>
-      ) : null}
-      {post.source === "planlanan" ? (
-        <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-sky-700 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
-          <ClockIcon className="size-3" aria-hidden="true" />
-          Plan
-        </span>
-      ) : null}
-      {post.postType === "reel" ? (
-        <span className="absolute right-2 top-2 rounded-full bg-black/70 p-1 text-white" title="Reel">
-          <PlayIcon className="size-3" aria-hidden="true" />
-        </span>
-      ) : null}
-      {post.postType === "carousel" ? (
-        <span className="absolute right-2 top-2 rounded-full bg-black/70 p-1 text-white" title="Carousel">
-          <RectangleStackIcon className="size-3" aria-hidden="true" />
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function SortableGridCell({
-  cell,
-  activeZone,
-  ...props
-}: {
-  cell: GridResult["cells"][number];
-  activeZone: GridZone | null;
-  dark: boolean;
-  onError?: (id: string) => void;
-  onSelect?: (id: string) => void;
-  selected?: boolean;
-}) {
-  const zone = gridCellZone(cell);
-  const blocked = activeZone !== null && !canDropInGridZone(activeZone, zone);
-  // Farklı bölgedeki hücreler droppable olarak kalır; bırakılamamalarını
-  // zoneCollisionDetection sağlar (üzerlerindeyken hedef yoktur).
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
-    id: cell.post.id,
-    data: { zone },
-  });
-  return (
-    <GridCellView
-      cell={cell}
-      {...props}
-      drag={{
-        ref: (node) => {
-          setNodeRef(node);
-          setActivatorNodeRef(node);
-        },
-        // Yalnız öteleme: rectSortingStrategy'nin ölçeği Post 3:4 / Reel 2:3
-        // oranını bozardı.
-        style: { transform: CSS.Translate.toString(transform), transition },
-        attributes,
-        listeners,
-        isDragging,
-        blocked,
-      }}
-    />
-  );
-}
-
-const ZONE_LABELS: Record<GridZone, string> = {
-  pinned: "sabitlenmiş",
-  planned: "planlanan",
-  existing: "mevcut",
-};
-
-const GRID_ZONES: GridZone[] = ["pinned", "planned", "existing"];
-const gridCollisionDetection = zoneCollisionDetection(closestCenter);
-
-/**
- * Editör gridi için kısıtlı sürükle-bırak: içerik yalnız kendi bölgesinde
- * (sabitlenmiş / planlanan / mevcut) taşınır. Sıranın tek kaynağı
- * GridProject; onReorder üst bileşende saf reorder fonksiyonunu çağırır.
- */
-function SortableGrid({
-  cells,
-  className,
-  onReorder,
-  cellProps,
-}: {
-  cells: GridResult["cells"];
-  className: string;
-  onReorder: (activeId: string, overId: string) => void;
-  cellProps: (cell: GridResult["cells"][number]) => { dark: boolean; onError?: (id: string) => void; onSelect?: (id: string) => void; selected?: boolean };
-}) {
-  const [activeZone, setActiveZone] = useState<GridZone | null>(null);
-  const sensors = useSensors(
-    // Birkaç piksel hareket olmadan sürükleme başlamaz: tıklama modalı açar.
-    useSensor(SafePointerSensor, { activationConstraint: { distance: 6 } }),
-    // Dokunmatikte basılı tutma; kısa dokunuş ve kaydırma sürüklemez.
-    useSensor(SafeTouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
-    // Space ile taşı, Enter ile içeriği aç (Enter tıklamaya bırakılır).
-    useSensor(SafeKeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-      keyboardCodes: { start: ["Space"], cancel: ["Escape"], end: ["Space", "Enter"] },
-    }),
-  );
-  const cellsOf = (zone: GridZone) => cells.filter((cell) => gridCellZone(cell) === zone);
-  const labelOf = (id: string | number) => cells.find((cell) => cell.post.id === id)?.post.alt || "İçerik";
-
-  const announcements: Announcements = {
-    onDragStart: ({ active }) => `${labelOf(active.id)} taşınıyor.`,
-    onDragOver: ({ active, over }) => {
-      if (!over) return `${labelOf(active.id)} bırakılabilir bir alanın üzerinde değil.`;
-      if (over.id === active.id) return `${labelOf(active.id)} taşınıyor.`;
-      return `${labelOf(active.id)}, ${labelOf(over.id)} konumunun üzerinde.`;
-    },
-    onDragEnd: ({ active, over }) => (over ? `${labelOf(active.id)} yeni konuma bırakıldı.` : `${labelOf(active.id)} bırakılmadı; sıra değişmedi.`),
-    onDragCancel: ({ active }) => `Taşıma iptal edildi; ${labelOf(active.id)} yerinde kaldı.`,
-  };
-
-  function handleDragStart(event: DragStartEvent) {
-    setActiveZone((event.active.data.current?.zone as GridZone | undefined) ?? null);
-  }
-
-  function handleDragEnd(event: DragEndEvent) {
-    const fromZone = event.active.data.current?.zone as GridZone | undefined;
-    const toZone = event.over?.data.current?.zone as GridZone | undefined;
-    setActiveZone(null);
-    if (!event.over || event.over.id === event.active.id) return;
-    if (!canDropInGridZone(fromZone, toZone)) return;
-    onReorder(String(event.active.id), String(event.over.id));
-  }
-
-  return (
-    <DndContext
-      id="grid-preview-dnd"
-      sensors={sensors}
-      collisionDetection={gridCollisionDetection}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragCancel={() => setActiveZone(null)}
-      accessibility={{
-        announcements,
-        screenReaderInstructions: {
-          draggable: "Taşımak için Space tuşuna basın, ok tuşlarıyla konumu seçin ve Space ile bırakın. İptal için Escape. İçeriği açmak için Enter.",
-        },
-      }}
-    >
-      <div className={className}>
-        {GRID_ZONES.map((zone) => (
-          <SortableContext key={zone} id={`grid-${zone}`} items={cellsOf(zone).map((cell) => cell.post.id)} strategy={rectSortingStrategy}>
-            {cellsOf(zone).map((cell) => (
-              <SortableGridCell key={cell.post.id} cell={cell} activeZone={activeZone} {...cellProps(cell)} />
-            ))}
-          </SortableContext>
-        ))}
-      </div>
-      {activeZone ? (
-        <p className="sr-only" aria-live="polite">
-          Yalnız {ZONE_LABELS[activeZone]} içerikler arasında taşınabilir.
-        </p>
-      ) : null}
-    </DndContext>
-  );
-}
-
 export default function GridPreview({
   brand,
   result,
@@ -330,7 +35,7 @@ export default function GridPreview({
   onSelectPost,
   selectedPostId,
   stories,
-  onReorder,
+  renderGrid,
 }: {
   brand: Brand;
   result: GridResult;
@@ -339,10 +44,10 @@ export default function GridPreview({
   selectedPostId?: string | null;
   stories?: Story[];
   /**
-   * Verilirse grid sürükle-bırak ile sıralanabilir (editör). Share ve diğer
-   * salt-okunur görünümler vermez. Yalnız tam gridde (POST sekmesi) açılır.
+   * Verilirse tam grid (POST sekmesi) bununla çizilir; editör sürüklenebilir
+   * SortableGrid'i verir. Share vermez ve dnd-kit hiç yüklenmez.
    */
-  onReorder?: (activeId: string, overId: string) => void;
+  renderGrid?: (args: GridRenderArgs) => ReactNode;
 }) {
   const [theme, toggleTheme] = useInstagramPreviewTheme();
   const dark = theme === "dark";
@@ -534,18 +239,17 @@ export default function GridPreview({
       </div>
 
       {/* Izgara (§14: 3 sütun) */}
-      {visibleCells.length && onReorder && tab === "post" ? (
-        <SortableGrid
-          cells={visibleCells}
-          className={`mt-3 grid grid-cols-3 gap-px px-1 ${separator}`}
-          onReorder={onReorder}
-          cellProps={(cell) => ({
+      {visibleCells.length && renderGrid && tab === "post" ? (
+        renderGrid({
+          cells: visibleCells,
+          className: `mt-3 grid grid-cols-3 gap-px px-1 ${separator}`,
+          cellProps: (cell) => ({
             dark,
             onError: onImageError,
             onSelect: onSelectPost,
             selected: selectedPostId === cell.post.id,
-          })}
-        />
+          }),
+        })
       ) : visibleCells.length ? (
         <div className={`mt-3 grid grid-cols-3 gap-px px-1 ${separator}`}>
           {visibleCells.map((cell) => (

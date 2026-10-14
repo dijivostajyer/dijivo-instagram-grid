@@ -172,7 +172,7 @@ export async function pullWorkspace(user: User): Promise<PersistedAppState | nul
   const rawPosts = (postsResult.data ?? []) as PostRow[];
   const rawStories = (storiesResult.data ?? []) as BrandRow[];
   const projects: GridProject[] = ((projectsResult.data ?? []) as BrandRow[]).map((project) => {
-    const mapPost = (row: PostRow) => ({ id: String(row.id), source: row.source as "mevcut" | "planlanan", imageUrl: ref(row.image_path) ?? "", alt: row.alt as string | undefined, aspectRatio: row.aspect_ratio as ExistingPost["aspectRatio"], postType: row.post_type as ExistingPost["postType"], caption: row.caption as string | undefined, mediaType: row.media_type as ExistingPost["mediaType"], videoUrl: ref(row.video_path), coverImageUrl: ref(row.cover_path), externalUrl: row.external_url as string | undefined, recencyIndex: row.recency_index as number, planOrder: row.plan_order as number, pinned: Boolean(row.pinned), pinnedOrder: row.pinned_order as number | undefined });
+    const mapPost = (row: PostRow) => ({ id: String(row.id), source: row.source as "mevcut" | "planlanan", imageUrl: ref(row.image_path) ?? "", alt: row.alt as string | undefined, aspectRatio: row.aspect_ratio as ExistingPost["aspectRatio"], postType: row.post_type as ExistingPost["postType"], caption: row.caption as string | undefined, mediaType: row.media_type as ExistingPost["mediaType"], videoUrl: ref(row.video_path), coverImageUrl: ref(row.cover_path), externalUrl: row.external_url as string | undefined, recencyIndex: row.recency_index as number, planOrder: row.plan_order as number, pinned: Boolean(row.pinned), pinnedOrder: row.pinned_order as number | undefined, gridOrder: typeof row.grid_order === "number" ? row.grid_order : undefined });
     const posts = rawPosts.filter((post) => post.project_id === project.id);
     const stories = rawStories.filter((story) => story.project_id === project.id).map((story) => ({ id: String(story.id), mediaType: story.media_type === "video" ? "video" as const : "image" as const, mediaUrl: ref(story.media_path) ?? "", createdAt: String(story.created_at), sortOrder: Number(story.sort_order), expiresAt: story.expires_at as string | undefined })).filter((story) => Boolean(story.mediaUrl));
     return { id: String(project.id), name: String(project.name), month: Number(project.month), year: Number(project.year), createdAt: String(project.created_at), updatedAt: String(project.updated_at), brandId: String(project.brand_id), brand: brands.find((brand) => brand.id === project.brand_id) ?? brands[0], existingPosts: posts.filter((post) => post.source === "mevcut").map(mapPost) as ExistingPost[], plannedPosts: posts.filter((post) => post.source === "planlanan").map(mapPost) as PlannedPost[], stories };
@@ -182,6 +182,32 @@ export async function pullWorkspace(user: User): Promise<PersistedAppState | nul
   const activeProjectId = typeof prefs?.active_project_id === "string" ? prefs.active_project_id : (projects.find((p) => p.brandId === activeBrandId)?.id ?? "");
   const active = projects.find((p) => p.id === activeProjectId);
   return { version: 3, brands, activeBrandId, projects, activeProjectId, brand: brands.find((b) => b.id === activeBrandId) ?? brands[0], existingPosts: active?.existingPosts ?? [], plannedPosts: active?.plannedPosts ?? [] };
+}
+
+/**
+ * `grid_order` sütunu 20261014130000 migration'ı ile gelir. Kod migration'dan
+ * önce yayına çıkarsa tüm gönderi yazımı "sütun yok" hatasıyla durmasın:
+ * yalnız bu hatada sütunsuz bir kez yeniden denenir (ortak sıra o zaman
+ * yalnız yerelde kalır) ve oturum boyunca sütun gönderilmez.
+ */
+let gridOrderColumnMissing = false;
+
+function isMissingGridOrderColumn(error: { message?: string; code?: string } | null): boolean {
+  return Boolean(error && /grid_order/.test(error.message ?? "") && (error.code === "PGRST204" || error.code === "42703" || /column|schema cache/i.test(error.message ?? "")));
+}
+
+type WorkspaceDb = NonNullable<ReturnType<typeof getSupabaseBrowserClient>>;
+
+async function upsertPostRows(db: WorkspaceDb, rows: Array<Record<string, unknown>>) {
+  const send = (input: Array<Record<string, unknown>>) =>
+    db.from("workspace_posts").upsert(input, { onConflict: "id" }).select("id, project_id");
+  const withoutGridOrder = () => rows.map(({ grid_order: _gridOrder, ...row }) => row);
+  if (gridOrderColumnMissing) return send(withoutGridOrder());
+  const result = await send(rows);
+  if (!isMissingGridOrderColumn(result.error)) return result;
+  gridOrderColumnMissing = true;
+  console.warn("[workspace] workspace_posts.grid_order sütunu yok; migration uygulanana kadar ortak grid sırası buluta yazılmayacak.");
+  return send(withoutGridOrder());
 }
 
 /**
@@ -214,9 +240,9 @@ export async function pushWorkspace(
   if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw new Error(`workspace_brands yazılamadı: ${error.message}`); }
   const projects = state.projects ?? [];
   if (projects.length) { const { error } = await db.from("workspace_projects").upsert(projects.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) throw new Error(`workspace_projects yazılamadı: ${error.message}`); }
-  const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl), external_url: post.externalUrl ?? null })));
+  const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl), external_url: post.externalUrl ?? null, grid_order: post.gridOrder ?? null })));
   if (postRows.length) {
-    const { data, error } = await db.from("workspace_posts").upsert(postRows, { onConflict: "id" }).select("id, project_id");
+    const { data, error } = await upsertPostRows(db, postRows);
     if (error) throw new Error(`workspace_posts yazılamadı: ${error.message}`);
     if ((data?.length ?? 0) !== postRows.length) {
       throw new Error(`workspace_posts yazımı doğrulanamadı: ${postRows.length} kayıt istendi, ${data?.length ?? 0} kayıt döndü.`);

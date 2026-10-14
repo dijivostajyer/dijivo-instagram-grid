@@ -84,6 +84,20 @@ describe("serialize / deserialize", () => {
     expect(restored).toEqual(state);
   });
 
+  it("ortak grid sırası (gridOrder) yerel kayıtta korunur; geçersiz değer reddedilir", () => {
+    const state = sampleState();
+    state.existingPosts = state.existingPosts.map((post, index) => ({ ...post, gridOrder: index * 2 + 1 }));
+    state.plannedPosts = state.plannedPosts.map((post, index) => ({ ...post, gridOrder: index * 2 }));
+    const restored = deserializeAppState(serializeAppState(state));
+    expect(restored).toEqual(state);
+    expect(computeGrid(restored!.existingPosts, restored!.plannedPosts).cells.map((cell) => cell.post.source))
+      .toEqual(computeGrid(state.existingPosts, state.plannedPosts).cells.map((cell) => cell.post.source));
+
+    const broken = JSON.parse(serializeAppState(state));
+    broken.plannedPosts[0].gridOrder = "ilk";
+    expect(deserializeAppState(JSON.stringify(broken))).toBeNull();
+  });
+
   it("şema sürümünü yazır ve okur", () => {
     const json = serializeAppState(sampleState());
     expect(JSON.parse(json).version).toBe(STORAGE_VERSION);

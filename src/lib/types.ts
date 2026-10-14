@@ -89,6 +89,12 @@ export interface Post {
   coverImageUrl?: string;
   /** Oynatılabilir video sağlanmadığında kullanılacak özgün Instagram bağlantısı. */
   externalUrl?: string;
+  /**
+   * Sabitlenmemiş içeriklerin (planlanan + mevcut) proje içindeki ortak
+   * grid sırası. Tanımsızsa içerik eski kurala göre yerleşir (planlananlar
+   * planOrder ile, mevcutlar recencyIndex ile); bkz. `computeGrid`.
+   */
+  gridOrder?: number;
 }
 
 /** Instagram'da halihazırda yayında olan gönderi */

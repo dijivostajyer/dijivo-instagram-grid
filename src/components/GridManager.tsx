@@ -21,6 +21,7 @@ import PlannedPostSorter from "@/components/PlannedPostSorter";
 import PlannedUpload from "@/components/PlannedUpload";
 import PostModal from "@/components/PostModal";
 import SettingsPage from "@/components/SettingsPage";
+import SortableGrid from "@/components/SortableGrid";
 import StoryManager from "@/components/StoryManager";
 import ShareWorkspace from "@/components/ShareWorkspace";
 import { useShareController } from "@/components/SharePanel";
@@ -36,7 +37,7 @@ import { resolveCalendarLink } from "@/lib/calendar-link";
 import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
 import { gridCellMediaSrc } from "@/lib/grid-ratio";
-import { reorderGridPosts } from "@/lib/grid-reorder";
+import { reorderGridPosts, reorderPlannedInGrid } from "@/lib/grid-reorder";
 import { monthLabel } from "@/lib/project-ops";
 import { type TypeFilter } from "@/lib/plan-stats";
 import {
@@ -272,10 +273,11 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     setSelectedPostId((current) => (current === id ? null : current));
   }
 
-  // Grid üzerinde sürükle-bırak: içerik yalnız kendi bölgesinde
-  // (sabitlenmiş / planlanan / mevcut) taşınır; geçersiz taşımada state
-  // değişmez. Yalnız sıra alanı (pinnedOrder / planOrder / recencyIndex)
-  // yeniden yazılır, içeriğin kaynağı korunur.
+  // Grid üzerinde sürükle-bırak: sabitlenmişler kendi aralarında,
+  // sabitlenmemişler (planlanan + mevcut) tek ortak bölgede taşınır;
+  // geçersiz taşımada state değişmez. Yalnız sıra alanları (pinnedOrder /
+  // gridOrder ve tutarlılık için planOrder / recencyIndex) yeniden yazılır,
+  // içeriğin kaynağı korunur.
   function handleReorderGrid(activeId: string, overId: string) {
     const next = reorderGridPosts(existingPosts, plannedPosts, activeId, overId);
     if (!next) return;
@@ -283,9 +285,17 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     if (next.plannedPosts !== plannedPosts) setPlannedPosts(next.plannedPosts);
   }
 
+  // Yan panel listesi: planlananlar gridde kapladıkları konumlara yeni
+  // sırayla yerleşir (ortak grid sırası korunur, mevcutlar yerinde kalır).
   function handleReorderPlanned(orderedIds: string[]) {
     setPlannedError(null);
-    setPlannedPosts((prev) => reorderPlannedPosts(prev, orderedIds));
+    const next = reorderPlannedInGrid(existingPosts, plannedPosts, orderedIds);
+    if (!next) {
+      setPlannedPosts((prev) => reorderPlannedPosts(prev, orderedIds));
+      return;
+    }
+    if (next.existingPosts !== existingPosts) setExistingPosts(next.existingPosts);
+    setPlannedPosts(next.plannedPosts);
   }
 
   const canPinMore = grid.pinnedCount < MAX_PINNED;
@@ -801,7 +811,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     selectedPostId={selectedPostId}
                     onSelectPost={setSelectedPostId}
                     stories={activeProject?.stories}
-                    onReorder={handleReorderGrid}
+                    renderGrid={(args) => <SortableGrid {...args} onReorder={handleReorderGrid} />}
                   />
                   <p className="mt-3 text-sm text-neutral-500">
                     Görseller merkezden kırpılır: Post 3:4, Reel 2:3 ({GRID_COLUMNS} sütun).

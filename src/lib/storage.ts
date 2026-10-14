@@ -65,6 +65,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value));
+}
+
 function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
@@ -136,6 +140,7 @@ function isExistingPost(value: unknown): value is ExistingPost {
     isMediaType(value.mediaType) &&
     isOptionalString(value.videoUrl) &&
     isOptionalString(value.coverImageUrl) &&
+    isOptionalNumber(value.gridOrder) &&
     typeof value.recencyIndex === "number" &&
     typeof value.pinned === "boolean" &&
     (value.pinnedOrder === undefined || typeof value.pinnedOrder === "number")
@@ -155,7 +160,8 @@ function isPlannedPost(value: unknown): value is PlannedPost {
     isMediaType(value.mediaType) &&
     isOptionalString(value.videoUrl) &&
     isOptionalString(value.coverImageUrl) &&
-    typeof value.planOrder === "number"
+    typeof value.planOrder === "number" &&
+    isOptionalNumber(value.gridOrder)
   );
 }
 

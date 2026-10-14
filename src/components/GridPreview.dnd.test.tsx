@@ -6,6 +6,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import GridPreview from "./GridPreview";
+import SortableGrid from "./SortableGrid";
 import { computeGrid } from "@/lib/grid";
 import { isInteractiveDragTarget, SafeKeyboardSensor, SafePointerSensor, SafeTouchSensor, zoneCollisionDetection } from "@/lib/dnd-sensors";
 import type { ExistingPost } from "@/lib/types";
@@ -133,7 +134,7 @@ describe("zoneCollisionDetection", () => {
 describe("GridPreview sürükle-bırak entegrasyonu", () => {
   it("sürüklenebilir kartta Space keyup varsayılanı (tıklama) iptal edilir; salt-okunurda edilmez", () => {
     const grid = computeGrid(posts, []);
-    const { unmount } = render(<GridPreview brand={brand} result={grid} onReorder={vi.fn()} />);
+    const { unmount } = render(<GridPreview brand={brand} result={grid} renderGrid={(args) => <SortableGrid {...args} onReorder={vi.fn()} />} />);
     const sortableCard = screen.getByRole("button", { name: "N1" });
     expect(fireEvent.keyUp(sortableCard, { code: "Space", key: " " })).toBe(false);
     expect(fireEvent.keyUp(sortableCard, { code: "Enter", key: "Enter" })).toBe(true);
@@ -146,7 +147,7 @@ describe("GridPreview sürükle-bırak entegrasyonu", () => {
 
   it("L. tıklama PostModal seçimini açar (sürükleme aktifken de)", () => {
     const onSelect = vi.fn();
-    render(<GridPreview brand={brand} result={grid} onSelectPost={onSelect} onReorder={vi.fn()} />);
+    render(<GridPreview brand={brand} result={grid} onSelectPost={onSelect} renderGrid={(args) => <SortableGrid {...args} onReorder={vi.fn()} />} />);
     const target = screen.getByRole("button", { name: "N1" });
     fireEvent.pointerDown(target, { isPrimary: true, button: 0, pointerType: "mouse", clientX: 10, clientY: 10 });
     fireEvent.pointerUp(target, { isPrimary: true, button: 0, pointerType: "mouse", clientX: 10, clientY: 10 });
@@ -158,7 +159,7 @@ describe("GridPreview sürükle-bırak entegrasyonu", () => {
     const onReorder = vi.fn();
     render(
       <>
-        <GridPreview brand={brand} result={grid} onReorder={onReorder} />
+        <GridPreview brand={brand} result={grid} renderGrid={(args) => <SortableGrid {...args} onReorder={onReorder} />} />
         <textarea aria-label="Caption" defaultValue="" />
       </>,
     );
@@ -173,7 +174,7 @@ describe("GridPreview sürükle-bırak entegrasyonu", () => {
   it("kartta Space klavye taşımasını başlatır, Escape iptal eder; sıra değişmez", async () => {
     const onReorder = vi.fn();
     const onSelect = vi.fn();
-    render(<GridPreview brand={brand} result={grid} onReorder={onReorder} onSelectPost={onSelect} />);
+    render(<GridPreview brand={brand} result={grid} renderGrid={(args) => <SortableGrid {...args} onReorder={onReorder} />} onSelectPost={onSelect} />);
     const target = screen.getByRole("button", { name: "N1" });
     target.focus();
     fireEvent.keyDown(target, { code: "Space", key: " " });
@@ -187,13 +188,13 @@ describe("GridPreview sürükle-bırak entegrasyonu", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("onReorder verilmeyen salt-okunur grid (Share) sürüklenebilir değildir", () => {
+  it("renderGrid verilmeyen salt-okunur grid (Share) sürüklenebilir değildir", () => {
     render(<GridPreview brand={brand} result={grid} onSelectPost={vi.fn()} />);
     expect(screen.getByRole("button", { name: "N1" }).getAttribute("aria-roledescription")).toBeNull();
   });
 
   it("Reel kartı sürüklenebilir gridde de 2:3, Post 3:4 kalır", () => {
-    render(<GridPreview brand={brand} result={grid} onReorder={vi.fn()} />);
+    render(<GridPreview brand={brand} result={grid} renderGrid={(args) => <SortableGrid {...args} onReorder={vi.fn()} />} />);
     expect(screen.getByRole("button", { name: "N2" }).className).toContain("aspect-[2/3]");
     expect(screen.getByRole("button", { name: "N1" }).className).toContain("aspect-[3/4]");
     expect(screen.getByRole("button", { name: "N1" }).getAttribute("aria-roledescription")).toBe("sortable");
