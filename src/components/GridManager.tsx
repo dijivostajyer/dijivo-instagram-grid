@@ -35,6 +35,7 @@ import { useCalendarStore } from "@/hooks/use-calendar-store";
 import { resolveCalendarLink } from "@/lib/calendar-link";
 import { resolveLaunchTarget } from "@/lib/brand-ops";
 import { computeGrid, GRID_COLUMNS } from "@/lib/grid";
+import { gridCellMediaSrc } from "@/lib/grid-ratio";
 import { monthLabel } from "@/lib/project-ops";
 import { type TypeFilter } from "@/lib/plan-stats";
 import {
@@ -367,9 +368,10 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     setSelectedPostId(null);
   }
 
-  // Export, UI'da görülen sırayı aynen almalı: grid cell'lerindeki imageUrl'ler.
+  // Export, UI'da görülen sırayı ve görseli aynen almalı: Reel'de kapak,
+  // diğerlerinde ana görsel (editörle aynı helper).
   const imageUrls = useMemo(
-    () => grid.cells.map((cell) => Promise.resolve(cell.post.imageUrl)),
+    () => grid.cells.map((cell) => Promise.resolve(gridCellMediaSrc(cell.post))),
     [grid],
   );
 

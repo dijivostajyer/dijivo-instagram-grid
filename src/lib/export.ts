@@ -1,5 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import type { Brand, GridResult } from "./types";
+import { gridCellHeightRatio, isReelCell, MAX_CELL_HEIGHT_RATIO } from "./grid-ratio";
 
 /** A4 dimensions in points (ISO 216). */
 export const A4_W = 595.28;
@@ -144,6 +145,129 @@ export function calculatePagination(
   return { rowsPerPage, cellsPerPage, pageCount };
 }
 
+/** Export sayfasında sabit satır sayısı: 3 satır × 3 kolon = 9 hücre/sayfa. */
+export const EXPORT_ROWS_PER_PAGE = 3;
+
+export interface ExportLayout {
+  /** Tüm hücrelerin ortak genişliği (A4 pt). */
+  cellWidth: number;
+  /** Grid A4 genişliğinde ortalanır; soldaki boşluk (A4 pt). */
+  offsetX: number;
+  rowsPerPage: number;
+  cellsPerPage: number;
+  pageCount: number;
+}
+
+/**
+ * Post 3:4 / Reel 2:3 export yerleşimi.
+ *
+ * Masonry yok: hücreler 3 kolonluk satırlara dizilir, her satır aynı y'den
+ * başlar ve satır yüksekliği o satırdaki en uzun hücredir (editördeki CSS
+ * grid ile aynı). Hücre genişliği, en kötü durumda (her satırda Reel) bile
+ * 3 satır header/footer bantları arasına sığacak şekilde seçilir; böylece
+ * sayfa başına hücre sayısı (9) ve sayfa sayısı içerikten bağımsız kalır.
+ */
+export function calculateExportLayout(cells: GridResult["cells"]): ExportLayout {
+  const usableHeight = GRID_BOTTOM - GRID_TOP;
+  const fullWidthCell = (A4_W - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
+  const fittingCell =
+    (usableHeight - GRID_LEADING * (EXPORT_ROWS_PER_PAGE - 1)) /
+    (EXPORT_ROWS_PER_PAGE * MAX_CELL_HEIGHT_RATIO);
+  // 0.01 pt'ye aşağı yuvarlama: kayan nokta hatası 3. satırı taşırmasın.
+  const cellWidth = Math.floor(Math.min(fullWidthCell, fittingCell) * 100) / 100;
+  const gridWidth = cellWidth * GRID_COLUMNS + GRID_LEADING * (GRID_COLUMNS - 1);
+  const pagination = calculatePagination(
+    cells,
+    cellWidth * MAX_CELL_HEIGHT_RATIO,
+    GRID_TOP,
+    GRID_BOTTOM,
+  );
+  return { cellWidth, offsetX: (A4_W - gridWidth) / 2, ...pagination };
+}
+
+export interface ExportCellRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  reel: boolean;
+}
+
+/**
+ * Bir sayfanın hücre dikdörtgenleri (A4 pt). Hücre yüksekliği post tipine
+ * göre (grid-ratio), satır başlangıcı satırdaki en uzun hücreye göre.
+ */
+export function calculateExportCellRects(
+  pageCells: GridResult["cells"],
+  layout: Pick<ExportLayout, "cellWidth" | "offsetX">,
+): ExportCellRect[] {
+  const rowHeights: number[] = [];
+  pageCells.forEach((cell, i) => {
+    const row = Math.floor(i / GRID_COLUMNS);
+    const height = layout.cellWidth * gridCellHeightRatio(cell.post.postType);
+    rowHeights[row] = Math.max(rowHeights[row] ?? 0, height);
+  });
+  const rowTops: number[] = [];
+  let top = GRID_TOP;
+  for (const height of rowHeights) {
+    rowTops.push(top);
+    top += height + GRID_LEADING;
+  }
+  return pageCells.map((cell, i) => ({
+    x: layout.offsetX + cell.column * (layout.cellWidth + GRID_LEADING),
+    y: rowTops[Math.floor(i / GRID_COLUMNS)],
+    width: layout.cellWidth,
+    height: layout.cellWidth * gridCellHeightRatio(cell.post.postType),
+    reel: isReelCell(cell.post.postType),
+  }));
+}
+
+/**
+ * object-cover kırpma: kaynak görselin merkezinden hedef oranında
+ * (dstW × dstH) en büyük dikdörtgen alınır. Editördeki `object-cover` ile
+ * aynı sonuç.
+ */
+export function calculateCoverCrop(
+  image: HTMLImageElement,
+  dstW: number,
+  dstH: number,
+): { srcX: number; srcY: number; srcW: number; srcH: number } {
+  const w = image.naturalWidth || image.width || 0;
+  const h = image.naturalHeight || image.height || 0;
+  if (w === 0 || h === 0 || dstW <= 0 || dstH <= 0) {
+    return { srcX: 0, srcY: 0, srcW: 1, srcH: 1 };
+  }
+  const targetRatio = dstW / dstH;
+  if (w / h > targetRatio) {
+    // Kaynak daha geniş: yanlardan kırp.
+    const srcW = h * targetRatio;
+    return { srcX: (w - srcW) / 2, srcY: 0, srcW, srcH: h };
+  }
+  // Kaynak daha uzun: üstten/alttan kırp.
+  const srcH = w / targetRatio;
+  return { srcX: 0, srcY: (h - srcH) / 2, srcW: w, srcH };
+}
+
+/** Editördeki Reel rozeti: sağ üstte koyu daire içinde oynat üçgeni. */
+function drawReelBadge(ctx: CanvasRenderingContext2D, rect: ExportCellRect): void {
+  const radius = 9;
+  const cx = rect.x + rect.width - 6 - radius;
+  const cy = rect.y + 6 + radius;
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(cx - 3, cy - 4.5);
+  ctx.lineTo(cx + 4.5, cy);
+  ctx.lineTo(cx - 3, cy + 4.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 /**
  * Compute a 1:1 square crop rectangle taken from the image centre.
  * - sourceSize = min(naturalWidth, naturalHeight)
@@ -194,8 +318,7 @@ export function renderExportPage(
   images: HTMLImageElement[],
   pageCells: GridResult["cells"],
   brand: Brand,
-  cellSize: number,
-  cellsPerPage: number,
+  layout: Pick<ExportLayout, "cellWidth" | "offsetX" | "cellsPerPage">,
   totalPages: number,
   profileImage?: HTMLImageElement | null,
   /** Vertical offset in A4 points; lets the JPG builder stack pages. */
@@ -221,38 +344,37 @@ export function renderExportPage(
   if (pageCells.length === 0) return;
 
   // Grid starts below the header band (avatar, brand, bio, date).
-  const gridTop = GRID_TOP;
-
   // `pageCells` are this page's slice of the grid, in grid order, so the local
   // row and the matching image index both come from the position in the page.
-  const imageOffset = page * cellsPerPage;
+  const imageOffset = page * layout.cellsPerPage;
+  const rects = calculateExportCellRects(pageCells, layout);
   for (let i = 0; i < pageCells.length; i += 1) {
     const cell = pageCells[i];
-    const column = cell.column;
-    const row = Math.floor(i / GRID_COLUMNS);
-    const x = column * (cellSize + GRID_LEADING);
-    const y = gridTop + row * (cellSize + GRID_LEADING);
+    const rect = rects[i];
+    const { x, y } = rect;
 
-    // Cell background.
+    // Cell background (Post 3:4, Reel 2:3).
     ctx.fillStyle = "#f8faf9";
-    ctx.fillRect(x, y, cellSize, cellSize);
+    ctx.fillRect(x, y, rect.width, rect.height);
 
     const image = images[imageOffset + i];
-    if (!image) continue;
-    const crop = calculateSquareCrop(image, cellSize);
+    if (image) {
+      // object-cover: kaynak merkezden hücre oranında kırpılır.
+      const crop = calculateCoverCrop(image, rect.width, rect.height);
+      ctx.drawImage(
+        image,
+        crop.srcX,
+        crop.srcY,
+        crop.srcW,
+        crop.srcH,
+        x,
+        y,
+        rect.width,
+        rect.height,
+      );
+    }
 
-    // object-cover like 1:1 crop from the centre, drawn into this cell.
-    ctx.drawImage(
-      image,
-      crop.srcX,
-      crop.srcY,
-      crop.srcW,
-      crop.srcH,
-      x + crop.dstX,
-      y + crop.dstY,
-      crop.dstW,
-      crop.dstH,
-    );
+    if (rect.reel) drawReelBadge(ctx, rect);
 
     // Pinned and planned markers.
     if (cell.pinned) {
@@ -443,10 +565,8 @@ export async function buildPdfBytes(
   imageElements: HTMLImageElement[],
 ): Promise<Uint8Array<ArrayBuffer>> {
   const { cells } = result;
-  const cellSize = (A4_W - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
-
-  const { cellsPerPage, pageCount } =
-    calculatePagination(cells, cellSize, GRID_TOP, GRID_BOTTOM);
+  const layout = calculateExportLayout(cells);
+  const { cellsPerPage, pageCount } = layout;
 
   // Profile avatar is loaded once, before rendering, so it is drawn on every
   // page (an async `Image.src` set inside the sync renderer would not be ready).
@@ -473,8 +593,7 @@ export async function buildPdfBytes(
       imageElements,
       pageCells,
       brand,
-      cellSize,
-      cellsPerPage,
+      layout,
       pageCount,
       profileImage,
     );
@@ -508,10 +627,8 @@ export async function buildJpgBytes(
   imageElements: HTMLImageElement[],
 ): Promise<Uint8Array<ArrayBuffer>> {
   const { cells } = result;
-  const cellSize = (A4_W - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
-
-  const { cellsPerPage, pageCount } =
-    calculatePagination(cells, cellSize, GRID_TOP, GRID_BOTTOM);
+  const layout = calculateExportLayout(cells);
+  const { cellsPerPage, pageCount } = layout;
 
   const profileImage = brand.profileImageUrl
     ? await loadImageAsElement(brand.profileImageUrl).catch(() => null)
@@ -534,8 +651,7 @@ export async function buildJpgBytes(
       imageElements,
       pageCells,
       brand,
-      cellSize,
-      cellsPerPage,
+      layout,
       pageCount,
       profileImage,
       page * A4_H,

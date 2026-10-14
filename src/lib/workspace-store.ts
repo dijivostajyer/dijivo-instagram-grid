@@ -6,7 +6,7 @@ import { syncActiveProject } from "./brand-ops";
 import { getSupabaseBrowserClient } from "./supabase-browser";
 import type { GridProject, PersistedAppState } from "./storage";
 import type { Brand, ExistingPost, PlannedPost, Story } from "./types";
-import { isWorkspaceMediaRef, uploadWorkspaceMedia, workspaceMediaPath } from "./workspace-media-store";
+import { isWorkspaceMediaRef, uploadWorkspaceMedia, workspaceMediaPath, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
 import { isInstagramPostUrl } from "./reel-media";
 
 type BrandRow = Record<string, unknown>;
@@ -14,11 +14,34 @@ type PostRow = Record<string, unknown>;
 const stored = (value: string | undefined) => isWorkspaceMediaRef(value) ? workspaceMediaPath(value) : value ?? null;
 const ref = (value: unknown) => typeof value === "string" ? `storage:workspace-media/${value}` : undefined;
 
-async function upload(value: string | undefined, purpose: string) {
-  return value ? uploadWorkspaceMedia(value, purpose) : undefined;
-}
+/**
+ * Oturum boyunca yaşayan yükleme önbelleği: kaynak (blob / dış URL) →
+ * workspace-media referansı. Autosave her seferinde canlı state'i (blob
+ * URL'leriyle) gönderir; önbellek olmadan aynı medya her kayıtta yeni bir
+ * Storage nesnesi olarak tekrar yükleniyor ve eskisi sahipsiz kalıyordu.
+ * Promise saklanır, böylece aynı kayıtta aynı blob'u kullanan alanlar
+ * (ör. Reel görseli ve kapağı) da tek yüklemeyi paylaşır.
+ */
+export type WorkspaceMediaUploadCache = Map<string, Promise<string>>;
 
-async function materializeMedia(state: PersistedAppState): Promise<PersistedAppState> {
+async function materializeMedia(state: PersistedAppState, user: User, cache: WorkspaceMediaUploadCache): Promise<PersistedAppState> {
+  const upload = async (value: string | undefined, purpose: string): Promise<string | undefined> => {
+    if (!value) return undefined;
+    // Zaten kalıcı olan medya (ref veya hydrate edilmiş imzalı URL) ağ
+    // çağrısı olmadan referansına döner; önbelleğe gerek yok.
+    if (isWorkspaceMediaRef(value) || workspaceMediaRefFromSignedUrl(value)) return uploadWorkspaceMedia(value, purpose);
+    // Anahtar marka önekini içerir: aynı blob başka markaya kopyalanmışsa o
+    // marka kendi nesnesini alır. Marka silme Storage'da yalnız o markanın
+    // önekini temizlediği için diğer markanın medyası bozulmaz.
+    const key = `${user.id}\n${purpose.split("/")[0]}\n${value}`;
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const pending = uploadWorkspaceMedia(value, purpose);
+    cache.set(key, pending);
+    // Başarısız yükleme önbellekte kalmaz; sonraki kayıt yeniden dener.
+    pending.catch(() => cache.delete(key));
+    return pending;
+  };
   const brand = async (item: Brand): Promise<Brand> => ({
     ...item,
     profileImageUrl: await upload(item.profileImageUrl, `${item.id}/profile`),
@@ -179,9 +202,13 @@ export function buildStoryRows(userId: string, projects: readonly GridProject[])
   });
 }
 
-export async function pushWorkspace(user: User, input: PersistedAppState): Promise<PersistedAppState> {
+export async function pushWorkspace(
+  user: User,
+  input: PersistedAppState,
+  uploadCache: WorkspaceMediaUploadCache = new Map(),
+): Promise<PersistedAppState> {
   const db = getSupabaseBrowserClient(); if (!db) throw new Error("Supabase Auth yapılandırılmadı.");
-  const state = await materializeMedia(input);
+  const state = await materializeMedia(input, user, uploadCache);
   const brands = state.brands ?? [];
   const brandRows = brands.map((brand) => ({ user_id: user.id, id: brand.id, name: brand.name, username: brand.username, display_name: brand.displayName ?? null, profile_image_path: stored(brand.profileImageUrl), bio: brand.bio ?? null, website: brand.website ?? null, phone: brand.phone ?? null, email: brand.email ?? null, category: brand.category ?? null, post_count: brand.postCount ?? null, followers_count: brand.followersCount ?? null, following_count: brand.followingCount ?? null, hashtag_groups: brand.hashtagGroups ?? [], default_mentions: brand.defaultMentions ?? [], default_ctas: brand.defaultCtas ?? [] }));
   if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw new Error(`workspace_brands yazılamadı: ${error.message}`); }

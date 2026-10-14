@@ -1,14 +1,7 @@
 "use client";
 
 import ExportPanel, { type ExportOptions } from "@/components/ExportPanel";
-import {
-  A4_W,
-  GRID_BOTTOM,
-  GRID_LEADING,
-  GRID_TOP,
-  calculatePagination,
-} from "@/lib/export";
-import { GRID_COLUMNS } from "@/lib/grid";
+import { calculateExportLayout } from "@/lib/export";
 import type { Brand, GridResult } from "@/lib/types";
 
 /**
@@ -28,13 +21,8 @@ export default function ExportWorkspace({
   options: ExportOptions;
   projectLabel: string;
 }) {
-  const cellSize = (A4_W - GRID_LEADING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
-  const { pageCount, cellsPerPage } = calculatePagination(
-    result.cells,
-    cellSize,
-    GRID_TOP,
-    GRID_BOTTOM,
-  );
+  // PDF/JPG ile aynı yerleşim (Post 3:4, Reel 2:3; 9 hücre/sayfa).
+  const { pageCount, cellsPerPage } = calculateExportLayout(result.cells);
 
   const rows: Array<{ label: string; value: string }> = [
     { label: "Biçim", value: "A4 dikey (210 × 297 mm)" },

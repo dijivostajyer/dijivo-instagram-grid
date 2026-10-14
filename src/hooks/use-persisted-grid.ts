@@ -45,7 +45,7 @@ import {
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
-import { pullWorkspace, pushWorkspace, reconcileWorkspaceState } from "../lib/workspace-store";
+import { pullWorkspace, pushWorkspace, reconcileWorkspaceState, type WorkspaceMediaUploadCache } from "../lib/workspace-store";
 import {
   duplicateWorkspaceMedia,
   isWorkspaceMediaRef,
@@ -275,6 +275,9 @@ export function usePersistedGrid(): PersistedGrid {
   const workspaceUserRef = useRef<import("@supabase/supabase-js").User | null>(null);
   const syncChainRef = useRef<Promise<void>>(Promise.resolve());
   const syncSequenceRef = useRef(0);
+  // Aynı blob/dış URL'in her autosave'de Storage'a yeniden yüklenmesini
+  // önler (kaynak → workspace-media ref, oturum boyunca).
+  const mediaUploadCacheRef = useRef<WorkspaceMediaUploadCache>(new Map());
 
   stateRef.current = state;
 
@@ -301,7 +304,7 @@ export function usePersistedGrid(): PersistedGrid {
           // Do not treat a non-empty workspace as fully migrated. Each entity
           // type is upserted, so missing posts/highlights heal without
           // overwriting existing remote records with local duplicates.
-          if ((reconciled.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, reconciled);
+          if ((reconciled.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, reconciled, mediaUploadCacheRef.current);
         } catch (error) {
           console.warn("[workspace] Uzak workspace yüklenemedi; yerel kopya kullanılacak.", error);
         }
@@ -356,7 +359,7 @@ export function usePersistedGrid(): PersistedGrid {
       syncChainRef.current = syncChainRef.current
         .catch(() => undefined)
         .then(async () => {
-          await pushWorkspace(user, snapshot);
+          await pushWorkspace(user, snapshot, mediaUploadCacheRef.current);
           if (sequence === syncSequenceRef.current) setSyncError(null);
         })
         .catch((error) => {
@@ -537,7 +540,8 @@ export function usePersistedGrid(): PersistedGrid {
       }
     }
 
-    // Yerel temizleme
+    // Yerel temizleme (sunucu medyası silindi; önbellekteki ref'ler artık geçersiz)
+    mediaUploadCacheRef.current.clear();
     clearPersistedState(getBrowserStorage());
     await clearStoredImages();
     await clearStoredVideos();

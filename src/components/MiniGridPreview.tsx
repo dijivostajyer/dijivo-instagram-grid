@@ -1,6 +1,6 @@
 "use client";
 
-import { gridCellAspectClass, POST_CELL_ASPECT_CLASS } from "@/lib/grid-ratio";
+import { gridCellAspectClass, gridCellMediaSrc, POST_CELL_ASPECT_CLASS } from "@/lib/grid-ratio";
 import type { GridResult } from "@/lib/types";
 
 /**
@@ -42,7 +42,7 @@ export default function MiniGridPreview({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={cell.post.imageUrl}
+              src={gridCellMediaSrc(cell.post)}
               alt=""
               loading="lazy"
               className="h-full w-full object-cover"

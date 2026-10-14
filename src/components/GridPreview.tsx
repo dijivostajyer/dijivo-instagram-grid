@@ -15,7 +15,7 @@ import {
 import StoryViewer from "./StoryViewer";
 
 import type { Brand, GridResult, Story } from "@/lib/types";
-import { gridCellAspectClass } from "@/lib/grid-ratio";
+import { gridCellAspectClass, gridCellMediaSrc } from "@/lib/grid-ratio";
 import {
   useInstagramPreviewTheme,
   type IgPreviewTheme,
@@ -47,11 +47,9 @@ function GridCellView({
 }) {
   const { post, pinned } = cell;
   // Reel: kapak görseli varsa onu göster; yoksa ana görsel
-  // (güvenli fallback — eski reel kayıtları bozulmaz, §4).
-  const mediaSrc =
-    post.mediaType === "video" && post.coverImageUrl
-      ? post.coverImageUrl
-      : post.imageUrl;
+  // (güvenli fallback — eski reel kayıtları bozulmaz, §4). Export da aynı
+  // helper'ı kullanır.
+  const mediaSrc = gridCellMediaSrc(post);
   const [status, setStatus] = useState<"loading" | "loaded" | "error">(
     "loading",
   );
