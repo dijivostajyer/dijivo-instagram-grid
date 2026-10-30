@@ -556,7 +556,7 @@ function FeedbackDetailPanel({
       {item.preview.caption ? (
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Açıklama</h3>
-          <p className="mt-1 whitespace-pre-line break-words text-sm text-neutral-700">{item.preview.caption}</p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm text-neutral-700">{item.preview.caption}</p>
         </section>
       ) : null}
 

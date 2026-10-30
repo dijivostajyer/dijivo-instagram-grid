@@ -1,5 +1,6 @@
 "use client";
 
+import CaptionText from "./CaptionText";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   BookmarkIcon,
@@ -238,7 +239,6 @@ export default function PostModal({
   const darkMuted = dark ? "text-neutral-400" : "text-neutral-500";
   const darkBorder = dark ? "border-neutral-800" : "border-slate-200";
 
-  const captionParts = caption.split(/(#[\p{L}\d_]+)/gu);
 
   const brandForProject = (project: GridProject) =>
     brands.find((item) => item.id === project.brandId)?.name ??
@@ -342,20 +342,9 @@ export default function PostModal({
             <span className="flex-1" />
             <BookmarkIcon className="size-6" aria-hidden="true" />
           </div>
-          <p className="px-4 pt-2 pb-4 text-sm leading-relaxed">
+          <p className="whitespace-pre-wrap break-words px-4 pt-2 pb-4 text-sm leading-relaxed">
             <span className="font-semibold">{brand.username}</span>{" "}
-            {captionParts.map((part, index) =>
-              part.startsWith("#") ? (
-                <span
-                  key={index}
-                  className="text-sky-700 dark:text-sky-400"
-                >
-                  {part}{" "}
-                </span>
-              ) : (
-                <span key={index}>{part}</span>
-              ),
-            )}
+            <CaptionText caption={caption} />
           </p>
         </div>
 

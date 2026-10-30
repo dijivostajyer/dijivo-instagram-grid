@@ -1,5 +1,6 @@
 "use client";
 
+import CaptionText from "./CaptionText";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookmarkIcon,
@@ -51,7 +52,6 @@ export default function SharePostModal({
   const externalUrl = post.externalUrl ?? (isInstagramPostUrl(post.videoUrl) ? post.videoUrl : undefined);
   const title = post.alt ?? post.id;
   const caption = post.caption ?? "";
-  const captionParts = caption.split(/(#[\p{L}\d_]+)/gu);
 
   // §11: modal kapanınca video durur, playback baştan başlar.
   function stopVideo() {
@@ -182,20 +182,9 @@ export default function SharePostModal({
               <span className="flex-1" />
               <BookmarkIcon className="size-6" aria-hidden="true" />
             </div>
-            <p className="text-sm leading-relaxed">
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
               <span className="font-semibold">{brand.username}</span>{" "}
-              {captionParts.map((part, index) =>
-                part.startsWith("#") ? (
-                  <span
-                    key={index}
-                    className="text-sky-700 dark:text-sky-400"
-                  >
-                    {part}{" "}
-                  </span>
-                ) : (
-                  <span key={index}>{part}</span>
-                ),
-              )}
+              <CaptionText caption={caption} />
             </p>
             {/* §19: carousel ileride multi-image genişletilebilir;
                 bu fazda tek görsel + caption ile açılır. */}
