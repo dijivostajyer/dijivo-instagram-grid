@@ -63,13 +63,18 @@ import {
 } from "../lib/story-ops";
 import { withBasePath } from "../lib/base-path";
 import {
-  collectSyncedIds,
+  changedEntities,
   computeRemovedIds,
+  fingerprintState,
+  idsOfFingerprints,
+  readBaseline,
   readSyncClean,
   shouldTrustRemote,
   workspaceSignature,
+  writeBaseline,
   writeSyncClean,
-  type SyncedIds,
+  EMPTY_SYNCED_IDS,
+  type SyncFingerprints,
 } from "../lib/workspace-sync";
 import {
   RESTORED_ELSEWHERE_MESSAGE,
@@ -88,6 +93,8 @@ export type { PostCopyOptions, NewBrandInput } from "../lib/brand-ops";
 export { getDefaultAppState };
 
 const WORKSPACE_REFRESH_INTERVAL_MS = 30_000;
+/** İki uzak çekim arasındaki en kısa süre (odak/görünürlük olaylarının birleştirilmesi için). */
+const MIN_REFRESH_GAP_MS = 10_000;
 
 /** Kullanıcı bir metin alanında yazıyorsa uzak durum uygulanmaz (imleç/taslak korunur). */
 function isEditingText(): boolean {
@@ -314,8 +321,10 @@ export function usePersistedGrid(): PersistedGrid {
   const epochRef = useRef<string | null | undefined>(undefined);
   // Geri yükleme sonrası veya başka sekmede geri yükleme fark edilince: yazım yok.
   const syncPausedRef = useRef(false);
-  // Önceki başarılı eşitlemede buluta yazılmış kimlikler: silmeleri buluta yaymak için.
-  const syncedIdsRef = useRef<SyncedIds>({ postIds: [], highlightIds: [] });
+  // Bu cihazın buluttaki son bilinen durumu (varlık parmak izleri): yalnız bundan farklı
+  // varlıklar buluta yazılır; bundan çıkan kimlikler buluttan silinir.
+  const baselineRef = useRef<SyncFingerprints | null>(null);
+  const lastRefreshAtRef = useRef(0);
   // Kuyrukta/yolda yazım sayısı ve son yazımın başarısı: bunlar yokken uzak veri
   // yerel durumun yerine güvenle alınabilir (başka cihazın değişikliği).
   const pendingPushesRef = useRef(0);
@@ -323,6 +332,13 @@ export function usePersistedGrid(): PersistedGrid {
   const refreshingRef = useRef(false);
 
   stateRef.current = state;
+
+  // Medya URL'sini kanonik referansa indirger (imzalı URL → storage ref); yerel
+  // blob URL'leri kendi değerinde kalır, böylece görsel değişimi de fark edilir.
+  const canonicalMedia = useCallback(
+    (url: string) => toWorkspaceMediaRef(url, refByObjectUrl.current) ?? url,
+    [],
+  );
 
   // Açılış: kayıtlı metaveri + görsel Blob'ları yüklenir.
   useEffect(() => {
@@ -358,6 +374,8 @@ export function usePersistedGrid(): PersistedGrid {
       let stored = local;
       if (user) {
         const clean = readSyncClean(browserStorage, user.id);
+        const storedBaseline = readBaseline(browserStorage, user.id);
+        baselineRef.current = storedBaseline;
         unsyncedRef.current = clean === false;
         try {
           const remote = await pullWorkspace(user);
@@ -366,13 +384,29 @@ export function usePersistedGrid(): PersistedGrid {
             // kaynaktır. Eski yerel kopyayı birleştirip geri yazmak başka
             // cihazda silinen/değiştirilen kayıtları geri getiriyordu.
             stored = remote;
+            baselineRef.current = fingerprintState(remote, canonicalMedia);
+            writeBaseline(browserStorage, user.id, baselineRef.current);
+          } else if (!remote && clean === true) {
+            // Bulut boş ama bu cihaz en son temiz eşitlenmişti: çalışma alanı başka
+            // bir cihazdan temizlendi. Eski yerel kopya buluta geri yazılmaz.
+            clearPersistedState(browserStorage);
+            await clearStoredImages().catch(() => undefined);
+            await clearStoredVideos().catch(() => undefined);
+            stored = getDefaultAppState();
+            baselineRef.current = null;
+            writeBaseline(browserStorage, user.id, null);
           } else {
-            const reconciled = reconcileWorkspaceState(remote, local);
-            // Do not treat a non-empty workspace as fully migrated. Each entity
-            // type is upserted, so missing posts/highlights heal without
-            // overwriting existing remote records with local duplicates.
+            const reconciled = reconcileWorkspaceState(remote, local, { baseline: storedBaseline, canonical: canonicalMedia });
+            // Do not treat a non-empty workspace as fully migrated. Entities are
+            // upserted, so missing posts/highlights heal; with a remote copy only
+            // what differs from it (local-only or locally edited) is written.
             if ((reconciled.brands?.length ?? 0) > 0) {
-              stored = await pushWorkspace(user, reconciled, mediaUploadCacheRef.current);
+              const scope = remote
+                ? changedEntities(fingerprintState(reconciled, canonicalMedia), fingerprintState(remote, canonicalMedia))
+                : undefined;
+              stored = await pushWorkspace(user, reconciled, mediaUploadCacheRef.current, EMPTY_SYNCED_IDS, scope);
+              baselineRef.current = fingerprintState(stored, canonicalMedia);
+              writeBaseline(browserStorage, user.id, baselineRef.current);
               writeSyncClean(browserStorage, user.id, true);
               unsyncedRef.current = false;
             }
@@ -387,7 +421,6 @@ export function usePersistedGrid(): PersistedGrid {
         trackedObjectUrls.current,
       );
       if (cancelled) return;
-      syncedIdsRef.current = collectSyncedIds(hydrated);
       stateRef.current = hydrated;
       setState(hydrated);
       setReady(true);
@@ -455,9 +488,17 @@ export function usePersistedGrid(): PersistedGrid {
               return;
             }
           }
-          const currentIds = collectSyncedIds(snapshot);
-          await pushWorkspace(user, snapshot, mediaUploadCacheRef.current, computeRemovedIds(syncedIdsRef.current, currentIds));
-          syncedIdsRef.current = currentIds;
+          // Yalnız baseline'dan değişen varlıklar yazılır; baseline'da olup artık
+          // olmayan gönderi/öne çıkanlar (bu cihazda silinenler) buluttan silinir.
+          const currentFingerprints = fingerprintState(snapshot, canonicalMedia);
+          const baseline = baselineRef.current;
+          await pushWorkspace(
+            user, snapshot, mediaUploadCacheRef.current,
+            baseline ? computeRemovedIds(idsOfFingerprints(baseline), idsOfFingerprints(currentFingerprints)) : EMPTY_SYNCED_IDS,
+            baseline ? changedEntities(currentFingerprints, baseline) : undefined,
+          );
+          baselineRef.current = currentFingerprints;
+          writeBaseline(browserStorage, user.id, currentFingerprints);
           if (sequence === syncSequenceRef.current) {
             setSyncError(null);
             unsyncedRef.current = false;
@@ -475,7 +516,7 @@ export function usePersistedGrid(): PersistedGrid {
           pendingPushesRef.current -= 1;
         });
     }
-  }, [state, ready, uploadTick]);
+  }, [state, ready, uploadTick, canonicalMedia]);
 
   // Başka cihazda yapılan değişiklikleri görmek için: sekme tekrar görünür/odaklı
   // olunca ve düzenli aralıkla uzak veri çekilir. Yalnız yerelde bekleyen/başarısız
@@ -495,6 +536,9 @@ export function usePersistedGrid(): PersistedGrid {
         !isEditingText();
       const startedWith = stateRef.current;
       if (!canApply(startedWith)) return;
+      // Odak + görünürlük olayları art arda gelir; sık çekim yapılmaz.
+      if (Date.now() - lastRefreshAtRef.current < MIN_REFRESH_GAP_MS) return;
+      lastRefreshAtRef.current = Date.now();
       refreshingRef.current = true;
       try {
         const remote = await pullWorkspace(user);
@@ -503,7 +547,12 @@ export function usePersistedGrid(): PersistedGrid {
         if (!canApply(startedWith)) return;
         const canonical = (url: string) =>
           url.startsWith("blob:") || url.startsWith("idb") ? "@local" : toWorkspaceMediaRef(url, refByObjectUrl.current) ?? url;
-        if (workspaceSignature(hydrated, canonical) === workspaceSignature(startedWith, canonical)) return;
+        if (workspaceSignature(hydrated, canonical) === workspaceSignature(startedWith, canonical)) {
+          // İçerik bulutla aynı: baseline'ı bu duruma eşitle.
+          baselineRef.current = fingerprintState(startedWith, canonicalMedia);
+          writeBaseline(getBrowserStorage(), user.id, baselineRef.current);
+          return;
+        }
         // Aktif marka/proje seçimi cihaza özgü görünümdür; uzak veride hâlâ varsa korunur.
         const brandId = hydrated.brands?.some((item) => item.id === startedWith.activeBrandId) ? startedWith.activeBrandId : hydrated.activeBrandId;
         const projectId = hydrated.projects?.some((item) => item.id === startedWith.activeProjectId) ? startedWith.activeProjectId : hydrated.activeProjectId;
@@ -513,7 +562,8 @@ export function usePersistedGrid(): PersistedGrid {
           activeProjectId: projectId,
           brand: hydrated.brands?.find((item) => item.id === brandId) ?? hydrated.brand,
         });
-        syncedIdsRef.current = collectSyncedIds(next);
+        baselineRef.current = fingerprintState(next, canonicalMedia);
+        writeBaseline(getBrowserStorage(), user.id, baselineRef.current);
         skipPersistRef.current = true;
         writePersistedState(getBrowserStorage(), toPersistableState(next, refByObjectUrl.current));
         stateRef.current = next;
@@ -526,15 +576,21 @@ export function usePersistedGrid(): PersistedGrid {
     };
     const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
     const onFocus = () => { void refresh(); };
+    // Bağlantı geri gelince yazılamayan değişiklikler kullanıcı eylemi beklemeden yeniden denenir.
+    const onOnline = () => {
+      if (unsyncedRef.current && pendingPushesRef.current === 0 && !syncPausedRef.current) setUploadTick((tick) => tick + 1);
+    };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
     const interval = window.setInterval(() => { void refresh(); }, WORKSPACE_REFRESH_INTERVAL_MS);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
       window.clearInterval(interval);
     };
-  }, [ready]);
+  }, [ready, canonicalMedia]);
 
   const commit = useCallback((next: PersistedAppState) => {
     stateRef.current = next;

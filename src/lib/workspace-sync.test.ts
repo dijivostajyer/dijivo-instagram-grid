@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { collectSyncedIds, computeRemovedIds, readSyncClean, shouldTrustRemote, workspaceSignature, writeSyncClean } from "./workspace-sync";
+import { changedEntities, collectSyncedIds, computeRemovedIds, emptyFingerprints, fingerprintState, idsOfFingerprints, readBaseline, readSyncClean, shouldTrustRemote, workspaceSignature, writeBaseline, writeSyncClean } from "./workspace-sync";
 import type { PersistedAppState, StorageLike } from "./storage";
 import type { Brand, ExistingPost, PlannedPost } from "./types";
 
@@ -67,5 +67,44 @@ describe("workspaceSignature", () => {
   it("aktif marka/proje seçimi cihaza özgüdür; imzayı etkilemez", () => {
     const a = state([existing("a")]);
     expect(workspaceSignature({ ...a, activeProjectId: "baska" }, canonical)).toBe(workspaceSignature(a, canonical));
+  });
+});
+
+describe("parmak izi / baseline", () => {
+  const same = (url: string) => url;
+
+  it("yalnız içeriği değişen varlıklar değişmiş sayılır; yeni varlık da dahildir", () => {
+    const baseline = fingerprintState(state([existing("a", { caption: "x" }), existing("b")]), same);
+    const current = fingerprintState(state([existing("a", { caption: "x\n\ny" }), existing("b"), existing("c")]), same);
+    const changed = changedEntities(current, baseline);
+    expect([...changed.postIds].sort()).toEqual(["a", "c"]);
+    expect(changed.brandIds.size).toBe(0);
+    expect(changed.projectIds.size).toBe(0);
+  });
+
+  it("silinen kimlikler baseline anahtarlarından hesaplanır", () => {
+    const baseline = fingerprintState(state([existing("a"), existing("b")]), same);
+    const current = fingerprintState(state([existing("a")]), same);
+    expect(computeRemovedIds(idsOfFingerprints(baseline), idsOfFingerprints(current)).postIds).toEqual(["b"]);
+  });
+
+  it("imzalı URL/medya eşlemesi: kanonik referans aynıysa değişmemiş sayılır", () => {
+    const canonical = (url: string) => url.replace(/\?token=.*$/, "");
+    const a = fingerprintState(state([existing("a", { imageUrl: "https://x.test/o.jpg?token=1" })]), canonical);
+    const b = fingerprintState(state([existing("a", { imageUrl: "https://x.test/o.jpg?token=2" })]), canonical);
+    expect(changedEntities(b, a).postIds.size).toBe(0);
+  });
+
+  it("baseline localStorage'a yazılıp okunur; bozuk/boş değer null döner", () => {
+    const storage = memoryStorage();
+    expect(readBaseline(storage, "u1")).toBeNull();
+    const fingerprints = fingerprintState(state([existing("a")]), same);
+    writeBaseline(storage, "u1", fingerprints);
+    expect(readBaseline(storage, "u1")).toEqual(fingerprints);
+    storage.setItem("dijivo-workspace-sync-baseline:u1", "{bozuk");
+    expect(readBaseline(storage, "u1")).toBeNull();
+    writeBaseline(storage, "u1", null);
+    expect(readBaseline(storage, "u1")).toBeNull();
+    expect(emptyFingerprints().posts).toEqual({});
   });
 });
