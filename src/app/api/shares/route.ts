@@ -4,9 +4,7 @@ import {
   describeInvalidShareInput,
   isWorkspaceMediaShareRef,
   validateShareCreateInput,
-  validateShareSnapshotInput,
-  MAX_SHARE_TOTAL_BYTES,
-  MAX_SHARE_TOTAL_VIDEO_BYTES,
+  MAX_SHARE_REQUEST_BYTES,
 } from "@/lib/share";
 import { getShareStore } from "@/lib/share-store";
 import { createClient } from "@supabase/supabase-js";
@@ -25,52 +23,15 @@ async function authenticate(request: Request): Promise<AuthenticationResult> {
   return { ok: true, userId: data.user.id };
 }
 
-function contentType(path: string, kind: "image" | "video"): string {
-  const extension = path.split(".").pop()?.toLowerCase();
-  if (extension === "png") return "image/png";
-  if (extension === "webp") return "image/webp";
-  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
-  if (extension === "webm") return "video/webm";
-  if (extension === "mp4") return "video/mp4";
-  return kind === "video" ? "video/mp4" : "image/jpeg";
-}
-
-async function copyWorkspaceMediaReferences(input: import("@/lib/share").ShareSnapshotInput, userId: string) {
-  const url = process.env.SUPABASE_URL?.trim();
-  const secret = process.env.SUPABASE_SECRET_KEY?.trim();
-  if (!url || !secret) throw new Error("Server Supabase yapılandırması eksik.");
-  const storage = createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false } }).storage.from("workspace-media");
-  const copy = async (value: string | undefined, kind: "image" | "video") => {
-    if (!value || !isWorkspaceMediaShareRef(value)) return value;
-    const path = value.slice("storage:workspace-media/".length);
-    if (!path.startsWith(`${userId}/`)) throw new Error("workspace-media sahipliği doğrulanamadı.");
-    const { data, error } = await storage.download(path);
-    if (error || !data) throw new Error(`workspace-media okuma başarısız: ${error?.message ?? "nesne bulunamadı"}`);
-    const bytes = Buffer.from(await data.arrayBuffer()).toString("base64");
-    return `data:${data.type || contentType(path, kind)};base64,${bytes}`;
-  };
-  return {
-    ...input,
-    brand: {
-      ...input.brand,
-      profileImageUrl: await copy(input.brand.profileImageUrl, "image"),
-      highlights: await Promise.all((input.brand.highlights ?? []).map(async (highlight) => ({ ...highlight, imageUrl: await copy(highlight.imageUrl, "image") }))),
-    },
-    cells: await Promise.all(input.cells.map(async (cell) => ({
-      ...cell,
-      imageUrl: (await copy(cell.imageUrl, "image")) ?? cell.imageUrl,
-      videoUrl: await copy(cell.videoUrl, "video"),
-      coverImageUrl: await copy(cell.coverImageUrl, "image"),
-    }))),
-    ...(input.stories
-      ? {
-          stories: await Promise.all(input.stories.map(async (story) => ({
-            ...story,
-            mediaUrl: (await copy(story.mediaUrl, story.mediaType)) ?? story.mediaUrl,
-          }))),
-        }
-      : {}),
-  };
+/** Girdideki tüm `storage:workspace-media/…` referansları (marka, öne çıkan, hücre, story). */
+function collectWorkspaceMediaRefs(input: import("@/lib/share").ShareSnapshotInput): string[] {
+  const values = [
+    input.brand.profileImageUrl,
+    ...(input.brand.highlights ?? []).map((highlight) => highlight.imageUrl),
+    ...input.cells.flatMap((cell) => [cell.imageUrl, cell.videoUrl, cell.coverImageUrl]),
+    ...(input.stories ?? []).map((story) => story.mediaUrl),
+  ];
+  return values.filter((value): value is string => typeof value === "string" && isWorkspaceMediaShareRef(value));
 }
 
 /**
@@ -116,14 +77,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     const raw = await request.text();
     const bodyBytes = new TextEncoder().encode(raw).byteLength;
-    // Videolar base64 data URL olarak gelir; görsel + video toplam sınırı
-    // ayrı ayrı kontrol edilir (Phase 2, §3).
-    const videoBytes = countVideoDataUrlBytes(raw);
-    if (
-      bodyBytes - videoBytes > MAX_SHARE_TOTAL_BYTES * 2 ||
-      videoBytes > MAX_SHARE_TOTAL_VIDEO_BYTES * 2
-    ) {
-      return NextResponse.json({ error: "Paylaşım için yüklenen dosyalar çok büyük." }, { status: 413 });
+    // Medya artık gövdede taşınmaz: kullanıcının Storage'daki dosyaları
+    // `storage:workspace-media/…` referansıyla gelir ve sunucuda Storage'dan
+    // Storage'a kopyalanır. Gövde yalnız metadata + küçük referanslar içerir.
+    if (bodyBytes > MAX_SHARE_REQUEST_BYTES) {
+      return NextResponse.json(
+        { error: "Paylaşım isteği çok büyük; medya dosyaları Storage'a yüklenemediği için gövdeye gömülmüş olabilir.", code: "SHARE_PAYLOAD_TOO_LARGE", requestId },
+        { status: 413 },
+      );
     }
     let parsed: unknown;
     try { parsed = JSON.parse(raw); } catch { parsed = null; }
@@ -135,40 +96,31 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
-    const portableInput = await copyWorkspaceMediaReferences(
-      await verifyShareContext(input, authentication.userId),
-      authentication.userId,
-    );
-    if (!validateShareSnapshotInput(portableInput)) throw new Error(`Share medya dönüşümü geçersiz: ${describeInvalidShareInput(portableInput)}`);
+    const portableInput = await verifyShareContext(input, authentication.userId);
+    if (collectWorkspaceMediaRefs(portableInput).some((value) => !value.startsWith(`storage:workspace-media/${authentication.userId}/`))) {
+      console.warn("[share] POST başka kullanıcıya ait medya referansı reddedildi", { requestId });
+      return NextResponse.json({ error: "Medya sahipliği doğrulanamadı.", code: "SHARE_MEDIA_FORBIDDEN", requestId }, { status: 403 });
+    }
     console.info("[share] POST payload doğrulandı", { requestId, cells: portableInput.cells.length, bodyBytes, hasVideo: portableInput.cells.some((cell) => Boolean(cell.videoUrl)), stories: portableInput.stories?.length ?? 0, hasContext: Boolean(portableInput.context) });
-    const snapshot = await getShareStore().create(portableInput);
+    const snapshot = await getShareStore().create(portableInput, { ownerId: authentication.userId });
     console.info("[share] Snapshot oluşturuldu", { requestId, token: snapshot.token, cells: input.cells.length });
     return NextResponse.json({ token: snapshot.token, requestId }, { status: 201 });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "bilinmeyen hata";
     console.error("[share] Snapshot oluşturulamadı", { requestId, detail });
     const message = error instanceof Error ? error.message : "";
+    // Kullanıcının düzeltebileceği hatalar açıkça iletilir; iç hatalar genel mesajda kalır.
+    if (/^(Paylaşım (görseli|videosu) geçersiz|Reel için kapak görseli gerekli)/.test(message)) {
+      return NextResponse.json({ error: message, code: "SHARE_MEDIA_INVALID", requestId }, { status: 422 });
+    }
+    const tooLarge = message.includes("çok büyük");
     return NextResponse.json(
       {
-        error: message.includes("çok büyük") ? "Paylaşım için yüklenen dosyalar çok büyük." : "Paylaşım bağlantısı oluşturulamadı.",
-        code: message.includes("çok büyük") ? "SHARE_PAYLOAD_TOO_LARGE" : "SHARE_CREATE_FAILED",
+        error: tooLarge ? "Paylaşım için yüklenen dosyalar çok büyük." : "Paylaşım bağlantısı oluşturulamadı.",
+        code: tooLarge ? "SHARE_PAYLOAD_TOO_LARGE" : "SHARE_CREATE_FAILED",
         requestId,
       },
-      { status: message.includes("çok büyük") ? 413 : 500 },
+      { status: tooLarge ? 413 : 500 },
     );
   }
-}
-
-/**
- * Gövde içindeki reel video data URL'lerinin yaklaşık bayt miktarı.
- * Doğrulama `validateShareSnapshotInput` içinde olduğundan bu sadece
- * erken 413 için kaba bir üst sınırdır.
- */
-function countVideoDataUrlBytes(raw: string): number {
-  let total = 0;
-  const pattern = /data:video\/(?:mp4|webm);base64,[a-z0-9+/=]+/gi;
-  for (const match of raw.matchAll(pattern)) {
-    total += match[0].length;
-  }
-  return total;
 }

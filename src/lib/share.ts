@@ -5,7 +5,14 @@ import { isHttpUrl, isInstagramPostUrl, isPlayableVideoUrl } from "./reel-media"
 export const SHARE_SNAPSHOT_VERSION = 1;
 export const MAX_SHARE_CELLS = 60;
 export const MAX_SHARE_IMAGE_BYTES = 10 * 1024 * 1024;
-export const MAX_SHARE_TOTAL_BYTES = 20 * 1024 * 1024;
+/**
+ * Paylaşımdaki tüm görsellerin toplam sınırı. Görseller artık istek gövdesinde
+ * değil, Storage'dan Storage'a kopyalanır (tek tek, bellekte yalnız bir dosya);
+ * bu yüzden eski 20 MB gövde sınırına bağlı değildir.
+ */
+export const MAX_SHARE_TOTAL_BYTES = 250 * 1024 * 1024;
+/** `/api/shares` JSON gövdesi (referanslar + küçük data URL'ler) için üst sınır. */
+export const MAX_SHARE_REQUEST_BYTES = 40 * 1024 * 1024;
 /** Phase 2 (§5/§9): reel video boyut sınırı (dosya başına). */
 export const MAX_SHARE_VIDEO_BYTES = 100 * 1024 * 1024;
 /** Phase 2 (§5/§9): paylaşım başına toplam video sınırı. */

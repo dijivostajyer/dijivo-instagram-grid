@@ -7,12 +7,16 @@ import {
   MAX_SHARE_VIDEO_BYTES,
   createShareSnapshot,
   deserializeShareSnapshot,
+  isWorkspaceMediaShareRef,
   type ShareSnapshot,
   type ShareSnapshotInput,
 } from "./share";
 import { getShareStorageConfig, type ShareStorageConfig } from "./share-config";
 import { generateShareToken, isValidShareToken } from "./share-token";
-import type { ShareStore } from "./share-store";
+import type { ShareCreateOptions, ShareStore } from "./share-store";
+import { detectImageMime, detectVideoMime, imageExtension, videoExtension } from "./share-media";
+
+const WORKSPACE_REF_PREFIX = "storage:workspace-media/";
 
 export type SnapshotRow = { token: string; version: number; created_at: string; payload: unknown; expires_at: string; revoked_at: string | null };
 
@@ -27,6 +31,11 @@ export interface SupabaseShareDriver {
   removeMedia(paths: string[]): Promise<void>;
   insert(row: SnapshotRow): Promise<void>;
   find(token: string): Promise<SnapshotRow | null>;
+  /**
+   * Kullanıcının private workspace-media nesnesini okur. Bayt akışı yalnız
+   * sunucu belleğinde, tek dosya olarak tutulur; JSON/base64'e çevrilmez.
+   */
+  downloadWorkspaceMedia?(path: string): Promise<Uint8Array>;
   /** share-images bucket'ında signed URL üretir. */
   sign(path: string, seconds: number): Promise<string>;
   /** share-media bucket'ında signed URL üretir (§9). */
@@ -56,6 +65,35 @@ function dataVideo(value: string): { mime: string; bytes: Uint8Array; extension:
   return { mime: `video/${match[1].toLowerCase()}`, bytes, extension: match[1].toLowerCase() };
 }
 
+type DecodedMedia = { mime: string; bytes: Uint8Array; extension: string };
+
+/**
+ * `storage:workspace-media/<ownerId>/…` referansını bayta çözer. Sahiplik
+ * yolun ilk bölümüyle doğrulanır; MIME tipi Storage'ın `Content-Type`'ına
+ * değil içerik baytlarına göre belirlenir.
+ */
+async function workspaceMedia(
+  driver: SupabaseShareDriver,
+  value: string,
+  ownerId: string | undefined,
+  kind: "image" | "video",
+): Promise<DecodedMedia> {
+  const path = value.slice(WORKSPACE_REF_PREFIX.length);
+  if (!ownerId || !path.startsWith(`${ownerId}/`) || path.split("/").includes("..")) {
+    throw new Error("workspace-media sahipliği doğrulanamadı.");
+  }
+  if (!driver.downloadWorkspaceMedia) throw new Error("workspace-media okuma desteklenmiyor.");
+  const bytes = await driver.downloadWorkspaceMedia(path);
+  if (kind === "image") {
+    const mime = detectImageMime(bytes);
+    if (!mime) throw new Error("Paylaşım görseli geçersiz (PNG/JPG/WebP olmalı).");
+    return { mime, bytes, extension: imageExtension(mime) };
+  }
+  const mime = detectVideoMime(bytes);
+  if (!mime) throw new Error("Paylaşım videosu geçersiz (MP4/WebM olmalı).");
+  return { mime, bytes, extension: videoExtension(mime) };
+}
+
 function storagePath(token: string, index: number, extension: string): string {
   return `shares/${token}/${index.toString(36)}-${generateShareToken().slice(0, 8)}.${extension}`;
 }
@@ -77,14 +115,14 @@ export class SupabaseShareStore implements ShareStore {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async create(input: ShareSnapshotInput): Promise<ShareSnapshot> {
+  async create(input: ShareSnapshotInput, options: ShareCreateOptions = {}): Promise<ShareSnapshot> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const token = this.createToken();
       const uploadedImages: string[] = [];
       const uploadedMedia: string[] = [];
       try {
-        const converted = await this.uploadDataMedia(input, token, uploadedImages, uploadedMedia);
+        const converted = await this.uploadDataMedia(input, token, uploadedImages, uploadedMedia, options.ownerId);
         const createdAt = this.now();
         const snapshot = createShareSnapshot(converted, token, createdAt.toISOString());
         await this.driver.insert({ token, version: snapshot.version, created_at: snapshot.createdAt, payload: snapshot, expires_at: addDays(createdAt, this.ttlDays).toISOString(), revoked_at: null });
@@ -136,6 +174,7 @@ export class SupabaseShareStore implements ShareStore {
     token: string,
     uploadedImages: string[],
     uploadedMedia: string[],
+    ownerId?: string,
   ): Promise<ShareSnapshotInput> {
     let totalImages = 0;
     let totalVideos = 0;
@@ -148,7 +187,7 @@ export class SupabaseShareStore implements ShareStore {
     const convertImage = async (url: string): Promise<string> => {
       const cached = cache.get(url);
       if (cached) return cached;
-      const image = dataImage(url);
+      const image = isWorkspaceMediaShareRef(url) ? await workspaceMedia(this.driver, url, ownerId, "image") : dataImage(url);
       if (url.startsWith("data:image/") && !image) throw new Error("Paylaşım görseli geçersiz.");
       if (!image) return url;
       if (image.bytes.byteLength > MAX_SHARE_IMAGE_BYTES) throw new Error("Paylaşım için yüklenen görseller çok büyük.");
@@ -165,7 +204,7 @@ export class SupabaseShareStore implements ShareStore {
     const convertVideo = async (url: string): Promise<string> => {
       const cached = cache.get(url);
       if (cached) return cached;
-      const video = dataVideo(url);
+      const video = isWorkspaceMediaShareRef(url) ? await workspaceMedia(this.driver, url, ownerId, "video") : dataVideo(url);
       if (url.startsWith("data:video/") && !video) throw new Error("Paylaşım videosu geçersiz.");
       if (!video) return url;
       if (video.bytes.byteLength > MAX_SHARE_VIDEO_BYTES) throw new Error("Paylaşım için yüklenen videolar çok büyük.");
@@ -186,9 +225,18 @@ export class SupabaseShareStore implements ShareStore {
       const { convertImage, convertVideo } = makeConverters(new Map<string, string>());
       const videoUrl = cell.videoUrl ? await convertVideo(cell.videoUrl) : undefined;
       const coverImageUrl = cell.coverImageUrl ? await convertImage(cell.coverImageUrl) : undefined;
-      cells.push({ ...cell, imageUrl: await convertImage(cell.imageUrl), videoUrl, coverImageUrl });
+      // Kapaksız reel'in grid görseli video nesnesinin kendisi olabilir; paylaşımda
+      // görsel yuvası kapak görseliyle doldurulur (video baytı görsel sayılmaz).
+      const gridImageIsVideo = cell.videoUrl !== undefined && cell.imageUrl === cell.videoUrl;
+      if (gridImageIsVideo && !coverImageUrl) throw new Error("Reel için kapak görseli gerekli; gönderiye bir kapak yükleyin.");
+      const imageUrl = gridImageIsVideo ? coverImageUrl! : await convertImage(cell.imageUrl);
+      cells.push({ ...cell, imageUrl, videoUrl, coverImageUrl });
     }
     const brandConverters = makeConverters(new Map<string, string>());
+    const highlights = [];
+    for (const highlight of input.brand.highlights ?? []) {
+      highlights.push({ ...highlight, imageUrl: highlight.imageUrl ? await brandConverters.convertImage(highlight.imageUrl) : undefined });
+    }
     const stories = [];
     for (const story of input.stories ?? []) {
       const { convertImage, convertVideo } = makeConverters(new Map<string, string>());
@@ -199,6 +247,7 @@ export class SupabaseShareStore implements ShareStore {
       brand: {
         ...input.brand,
         profileImageUrl: input.brand.profileImageUrl ? await brandConverters.convertImage(input.brand.profileImageUrl) : undefined,
+        ...(input.brand.highlights ? { highlights } : {}),
       },
       cells,
       ...(input.stories ? { stories } : {}),
@@ -216,7 +265,13 @@ export class SupabaseShareStore implements ShareStore {
       url === undefined ? undefined : url.startsWith("storage:media/") ? this.driver.signMedia(url.slice(8), 3600) : url;
     return {
       ...snapshot,
-      brand: { ...snapshot.brand, profileImageUrl: snapshot.brand.profileImageUrl ? await resolveImage(snapshot.brand.profileImageUrl) : undefined },
+      brand: {
+        ...snapshot.brand,
+        profileImageUrl: snapshot.brand.profileImageUrl ? await resolveImage(snapshot.brand.profileImageUrl) : undefined,
+        ...(snapshot.brand.highlights
+          ? { highlights: await Promise.all(snapshot.brand.highlights.map(async (highlight) => ({ ...highlight, imageUrl: highlight.imageUrl ? await resolveImage(highlight.imageUrl) : undefined }))) }
+          : {}),
+      },
       cells: await Promise.all(snapshot.cells.map(async (cell) => ({
         ...cell,
         imageUrl: await resolveImage(cell.imageUrl),
@@ -251,6 +306,14 @@ export function createSupabaseShareDriver(config: ShareStorageConfig = getShareS
         console.error("[share-api]", { step: "upload_media", bucket: config.mediaBucket, errorName: error.name, error: error.message });
         throw new Error(`share-media upload başarısız: ${error.message}`);
       }
+    },
+    async downloadWorkspaceMedia(path) {
+      const { data, error } = await client.storage.from(config.workspaceBucket).download(path);
+      if (error || !data) {
+        console.error("[share-api]", { step: "download_workspace_media", bucket: config.workspaceBucket, errorName: error?.name, error: error?.message ?? "nesne bulunamadı" });
+        throw new Error(`workspace-media okuma başarısız: ${error?.message ?? "nesne bulunamadı"}`);
+      }
+      return new Uint8Array(await data.arrayBuffer());
     },
     async remove(paths) {
       const { error } = await client.storage.from(config.bucket).remove(paths);

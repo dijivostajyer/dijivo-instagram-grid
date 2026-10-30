@@ -29,7 +29,7 @@ import {
   type ShareSnapshotInput,
 } from "./share";
 import type { Brand, GridResult, Story } from "./types";
-import { isWorkspaceMediaRef, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
+import { isWorkspaceMediaRef, uploadWorkspaceMediaBytes, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
 
 export interface ResolvedMedia {
   bytes: Uint8Array;
@@ -44,6 +44,13 @@ export type PosterMaker = (
   bytes: Uint8Array,
   mime: ShareVideoMime,
 ) => Promise<ResolvedMedia | null>;
+
+/**
+ * Çözülmüş yerel medyayı kullanıcının private Storage'ına yükler ve
+ * `storage:workspace-media/…` referansını döndürür. Oturum yoksa `null`
+ * (çağıran data URL'e düşer).
+ */
+export type MediaUploader = (media: ResolvedMedia) => Promise<string | null>;
 
 export class ShareMediaPrepareError extends Error {}
 
@@ -198,6 +205,11 @@ export async function prepareShareInput(
     fetchImage?: typeof fetch;
     reader?: LocalMediaReader;
     posterMaker?: PosterMaker;
+    /**
+     * Yerel medyanın gövdeye base64 gömülmesi yerine doğrudan Storage'a
+     * yüklenmesi (büyük dosyalar için). Varsayılan: workspace-media.
+     */
+    uploader?: MediaUploader;
     /** Faz 3: aktif aylık planın Story'leri ve geri bildirim ilişkisi. */
     stories?: Story[];
     brandId?: string;
@@ -207,6 +219,7 @@ export async function prepareShareInput(
   const fetchImage = options.fetchImage ?? fetch;
   const reader = options.reader ?? createBrowserMediaReader(fetchImage);
   const posterMaker = options.posterMaker ?? createBrowserPosterMaker();
+  const uploader = options.uploader ?? ((media: ResolvedMedia) => uploadWorkspaceMediaBytes(media.bytes, media.mime, "share"));
 
   /**
    * Yerel referansı data URL'e çevirir; yerel değilse dokunmaz.
@@ -241,7 +254,9 @@ export async function prepareShareInput(
       }
       return toDataUrl(poster);
     }
-    return toDataUrl(media);
+    // Medya baytları JSON'a gömülmez: Storage'a yüklenir, istekte yalnız ref gider.
+    const uploaded = await uploader(media);
+    return uploaded ?? toDataUrl(media);
   };
 
   const input = shareInputFromGrid(brand, result, {
