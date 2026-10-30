@@ -232,6 +232,8 @@ export async function pushWorkspace(
   user: User,
   input: PersistedAppState,
   uploadCache: WorkspaceMediaUploadCache = new Map(),
+  /** Kullanıcının silip önceki eşitlemede buluta yazılmış kayıtlar (yalnız bu kullanıcının satırları). */
+  removed: { postIds: string[]; highlightIds: string[] } = { postIds: [], highlightIds: [] },
 ): Promise<PersistedAppState> {
   const db = getSupabaseBrowserClient(); if (!db) throw new Error("Supabase Auth yapılandırılmadı.");
   const state = await materializeMedia(input, user, uploadCache);
@@ -256,6 +258,10 @@ export async function pushWorkspace(
   if (highlights.length) { const { error } = await db.from("workspace_highlights").upsert(highlights, { onConflict: "id" }); if (error) throw new Error(`workspace_highlights yazılamadı: ${error.message}`); }
   const stories = buildStoryRows(user.id, projects);
   if (stories.length) { const { error } = await db.from("workspace_stories").upsert(stories, { onConflict: "id" }); if (error) throw new Error(`workspace_stories yazılamadı: ${error.message}`); }
+  // Silmeler yukarıdaki yazımlardan sonra uygulanır; böylece yazım başarısız olursa
+  // hiçbir şey silinmez. Yalnız önceden eşitlenmiş kimlikler gelir (bkz. computeRemovedIds).
+  if (removed.postIds.length) { const { error } = await db.from("workspace_posts").delete().eq("user_id", user.id).in("id", removed.postIds); if (error) throw new Error(`workspace_posts silinemedi: ${error.message}`); }
+  if (removed.highlightIds.length) { const { error } = await db.from("workspace_highlights").delete().eq("user_id", user.id).in("id", removed.highlightIds); if (error) throw new Error(`workspace_highlights silinemedi: ${error.message}`); }
   const { error } = await db.from("workspace_prefs").upsert({ user_id: user.id, active_brand_id: state.activeBrandId || null, active_project_id: state.activeProjectId || null }); if (error) throw new Error(`workspace_prefs yazılamadı: ${error.message}`);
   return syncActiveProject(state);
 }
