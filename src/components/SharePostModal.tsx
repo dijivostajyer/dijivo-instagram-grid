@@ -1,6 +1,7 @@
 "use client";
 
 import CaptionText from "./CaptionText";
+import ReelVideoWithCover from "./ReelVideoWithCover";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookmarkIcon,
@@ -13,7 +14,7 @@ import {
 } from "@heroicons/react/16/solid";
 
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
-import { isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
+import { getReelCoverUrl, isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
 import type { Brand, ExistingPost, PlannedPost } from "@/lib/types";
 
 /**
@@ -138,20 +139,14 @@ export default function SharePostModal({
         <div className="grid lg:grid-cols-2">
           {/* Medya: Reel video oynatıcı veya gönderi görseli (§11/§19) */}
           {isReel && post.videoUrl ? (
-            <div className="relative flex w-full items-center justify-center bg-black">
-              {/* Autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
-              <video
-                key={post.videoUrl}
-                ref={videoRef}
-                src={post.videoUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="block max-h-[80vh] w-full aspect-[9/16] object-contain"
-                aria-label={`Reel videosu: ${title}`}
-                onError={() => setVideoFailed(true)}
-              />
-            </div>
+            <ReelVideoWithCover
+              videoUrl={post.videoUrl}
+              coverUrl={getReelCoverUrl(post)}
+              title={title}
+              videoRef={videoRef}
+              videoAriaLabel={`Reel videosu: ${title}`}
+              onVideoError={() => setVideoFailed(true)}
+            />
           ) : (
             <div className="relative flex w-full items-center justify-center bg-neutral-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -1,6 +1,7 @@
 "use client";
 
 import CaptionText from "./CaptionText";
+import ReelVideoWithCover from "./ReelVideoWithCover";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   BookmarkIcon,
@@ -20,7 +21,7 @@ import {
   type NewBrandInput,
 } from "@/hooks/use-persisted-grid";
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
-import { isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
+import { getReelCoverUrl, isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
 import {
   MAX_VIDEO_BYTES,
   loadCoverFile,
@@ -300,20 +301,14 @@ export default function PostModal({
           </div>
 
           {isReel && post.videoUrl ? (
-            <div className="relative flex w-full items-center justify-center bg-black">
-              {/* §7: autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
-              <video
-                key={post.videoUrl}
-                ref={videoRef}
-                src={post.videoUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="block max-h-[80vh] w-full aspect-[9/16] object-contain"
-                aria-label="Reel video önizlemesi"
-                onError={() => setVideoFailed(true)}
-              />
-            </div>
+            <ReelVideoWithCover
+              videoUrl={post.videoUrl}
+              coverUrl={getReelCoverUrl(post)}
+              title={title}
+              videoRef={videoRef}
+              videoAriaLabel="Reel video önizlemesi"
+              onVideoError={() => setVideoFailed(true)}
+            />
           ) : (
             <div className="relative flex w-full items-center justify-center bg-neutral-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
