@@ -103,6 +103,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // share_feedback_workflow_events FK'leri RESTRICT'tir (olay geçmişi kazara silinmesin diye):
+    // snapshot silinince feedback CASCADE ile gider, ama event varken bu işlem reddedilir.
+    // Bu rota bilinçli tam temizlik olduğu için event → feedback sırasıyla açıkça silinir.
+    // Adımlar ayrı PostgREST istekleridir (tek transaction değil); event silmesi geri alınamaz.
+    const { error: eventsError } = await client.from("share_feedback_workflow_events").delete().not("id", "is", null);
+    if (eventsError) {
+      logFailure("delete_feedback_events", eventsError);
+      return NextResponse.json({ error: "Geri bildirim geçmişi silinemedi." }, { status: 500 });
+    }
+    const { error: feedbackError } = await client.from("share_feedback").delete().not("id", "is", null);
+    if (feedbackError) {
+      logFailure("delete_feedback", feedbackError);
+      return NextResponse.json({ error: "Geri bildirimler silinemedi." }, { status: 500 });
+    }
+
     const deletionResults = await Promise.all([
       client.from("workspace_prefs").delete().eq("user_id", userId),
       client.from("workspace_highlights").delete().eq("user_id", userId),

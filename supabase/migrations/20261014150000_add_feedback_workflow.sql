@@ -68,8 +68,8 @@ create trigger share_feedback_protect_customer_fields
 
 create table if not exists public.share_feedback_workflow_events (
   id uuid primary key default gen_random_uuid(),
-  feedback_id uuid not null references public.share_feedback (id) on delete cascade,
-  user_id uuid not null references auth.users (id) on delete cascade,
+  feedback_id uuid not null references public.share_feedback (id) on delete restrict,
+  user_id uuid not null references auth.users (id) on delete restrict,
   status text not null,
   created_at timestamptz not null default now(),
   constraint share_feedback_workflow_events_status_check
