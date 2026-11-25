@@ -159,7 +159,7 @@ export interface ExportLayout {
 }
 
 /**
- * Post 3:4 / Reel 2:3 export yerleşimi.
+ * Post ve Reel 3:4 export yerleşimi.
  *
  * Masonry yok: hücreler 3 kolonluk satırlara dizilir, her satır aynı y'den
  * başlar ve satır yüksekliği o satırdaki en uzun hücredir (editördeki CSS
@@ -353,7 +353,7 @@ export function renderExportPage(
     const rect = rects[i];
     const { x, y } = rect;
 
-    // Cell background (Post 3:4, Reel 2:3).
+    // Cell background (Post ve Reel 3:4).
     ctx.fillStyle = "#f8faf9";
     ctx.fillRect(x, y, rect.width, rect.height);
 

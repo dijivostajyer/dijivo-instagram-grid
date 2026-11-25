@@ -92,7 +92,7 @@ describe("Geri Dönüşler listesi", () => {
     expect(screen.getByText("Paylaşım bağlantılarından gelen onay ve revize talepleri burada görüntülenir.")).toBeTruthy();
   });
 
-  it("C/D/E/F/G/H. Post 3:4, Reel 2:3, Story 9:16, grid ikon; onay ve revize mesajı; marka, ay, müşteri, tarih", async () => {
+  it("C/D/E/F/G/H. Post ve Reel 3:4, Story 9:16, grid ikon; onay ve revize mesajı; marka, ay, müşteri, tarih", async () => {
     renderCenter([
       rec({ targetType: "post", targetId: "post-1", action: "approved" }),
       rec({ targetType: "reel", targetId: "reel-1", action: "revision_requested", message: "Müzik daha enerjik olsun." }),
@@ -105,7 +105,7 @@ describe("Geri Dönüşler listesi", () => {
     // Flex kartı küçük resmi uzatıp oranı bozmasın (tarayıcıda ölçülen hata).
     expect(within(post).getByRole("img").parentElement?.className).toContain("self-start");
     expect(post.getAttribute("aria-label")).toBe("Dijivo Kafe, Ekim 2026, Post, Onaylandı, Yeni, Ayşe Yılmaz, okunmamış");
-    expect(within(reel).getByRole("img").parentElement?.className).toContain("aspect-[2/3]");
+    expect(within(reel).getByRole("img").parentElement?.className).toContain("aspect-[3/4]");
     expect(within(story).getByRole("img", { name: "Story önizlemesi" }).parentElement?.className).toContain("aspect-[9/16]");
     expect(within(grid).getByLabelText("Tüm grid").className).toContain("aspect-square");
     expect(within(post).getByText("Post")).toBeTruthy();

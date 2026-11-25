@@ -62,11 +62,11 @@ describe("calculateExportLayout", () => {
 });
 
 describe("calculateExportCellRects", () => {
-  it("Post 3:4, Reel 2:3", () => {
+  it("Post, Reel ve Carousel hepsi 3:4", () => {
     const cells = cellsOf(["post", "reel", "carousel"]);
     const rects = calculateExportCellRects(cells, calculateExportLayout(cells));
     expect(rects[0].height / rects[0].width).toBeCloseTo(4 / 3, 10);
-    expect(rects[1].height / rects[1].width).toBeCloseTo(3 / 2, 10);
+    expect(rects[1].height / rects[1].width).toBeCloseTo(4 / 3, 10);
     expect(rects[2].height / rects[2].width).toBeCloseTo(4 / 3, 10);
     expect(rects.map((rect) => rect.reel)).toEqual([false, true, false]);
   });
@@ -76,7 +76,7 @@ describe("calculateExportCellRects", () => {
     const layout = calculateExportLayout(cells);
     const rects = calculateExportCellRects(cells, layout);
     expect(new Set(rects.slice(0, 3).map((rect) => rect.y))).toEqual(new Set([GRID_TOP]));
-    const reelRowHeight = layout.cellWidth * 1.5;
+    const reelRowHeight = layout.cellWidth * (4 / 3);
     expect(rects[3].y).toBeCloseTo(GRID_TOP + reelRowHeight + GRID_LEADING, 10);
     expect(new Set(rects.slice(3).map((rect) => rect.y)).size).toBe(1);
     // Kolon x'leri her satırda aynı (masonry yok).
@@ -137,7 +137,7 @@ describe("renderExportPage", () => {
     expect(media).toHaveLength(3);
     const ratios = media.map((call) => (call.args[8] as number) / (call.args[7] as number));
     expect(ratios[0]).toBeCloseTo(4 / 3, 10);
-    expect(ratios[1]).toBeCloseTo(3 / 2, 10);
+    expect(ratios[1]).toBeCloseTo(4 / 3, 10);
     expect(ratios[2]).toBeCloseTo(4 / 3, 10);
 
     // Rozet: Reel hücresinin sağ üst köşesinde tek daire (avatar daire'si hariç).

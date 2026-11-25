@@ -3,11 +3,11 @@
 import { useRef, useState } from "react";
 
 import { filterByType, type TypeFilter } from "@/lib/plan-stats";
-import { MAX_VIDEO_BYTES, loadCoverFile, loadImageFile, loadVideoFile } from "@/lib/validators";
+import { MAX_VIDEO_BYTES, getMediaSizeAdvisory, loadCoverFile, loadImageFile, loadVideoFile } from "@/lib/validators";
 import type { ExistingPost, PostType } from "@/lib/types";
 
 /** Reel video desteği metni (doğrulama limitiyle aynı kaynak, §3). */
-const REEL_HINT = `MP4 veya WebM · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB · Tek video`;
+const REEL_HINT = `MP4 veya WebM · Önerilen 1080 × 1920 px (9:16) · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB · Tek video`;
 
 /**
  * Mevcut gönderi yönetimi: görsel yükleme, yayın sırası kontrolü
@@ -63,6 +63,7 @@ export default function ExistingPostList({
   const [recency, setRecency] = useState<"enYeni" | "enEski">("enYeni");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType>("post");
   // §3: Reel seçildiğinde kapak + video akışı (kapak isteğe bağlı). */
   const [pendingCover, setPendingCover] = useState<{ url: string; alt: string } | null>(null);
@@ -85,12 +86,16 @@ export default function ExistingPostList({
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
     setError(null);
+    setNotice(null);
     setBusy(true);
     const failures: string[] = [];
+    const advisories: string[] = [];
     const batch = recency === "enYeni" ? Array.from(files).reverse() : Array.from(files);
     for (const file of batch) {
       try {
-        const { url, alt, aspectRatio } = await loadImageFile(file);
+        const { url, alt, aspectRatio, width, height } = await loadImageFile(file);
+        const advisory = getMediaSizeAdvisory(width, height, "post");
+        if (advisory) advisories.push(`${file.name}: ${advisory}`);
         onUpload({ url, alt, recency, postType, aspectRatio });
       } catch (e) {
         failures.push(`${file.name}: ${e instanceof Error ? e.message : "Görsel yüklenemedi."}`);
@@ -99,6 +104,7 @@ export default function ExistingPostList({
     if (failures.length) {
       setError(failures.join(" "));
     }
+    if (advisories.length) setNotice(`Boyut önerisi (yükleme yapıldı, dosya değiştirilmedi): ${advisories.join(" ")}`);
     setBusy(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -119,9 +125,12 @@ export default function ExistingPostList({
   async function handleVideoFile(file: File | undefined) {
     if (!file) return;
     setError(null);
+    setNotice(null);
     try {
-      const { url } = await loadVideoFile(file);
+      const { url, width, height } = await loadVideoFile(file);
       setPendingVideo({ url, name: file.name });
+      const advisory = getMediaSizeAdvisory(width, height, "reel");
+      setNotice(advisory ? `Boyut önerisi (video yüklendi, dosya değiştirilmedi): ${advisory}` : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Video yüklenemedi.");
     } finally {
@@ -251,6 +260,11 @@ export default function ExistingPostList({
       {error ? (
         <p role="alert" className="mb-3 text-sm font-medium text-red-700">
           {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p role="status" className="mb-3 text-sm text-amber-700">
+          {notice}
         </p>
       ) : null}
       {pinError ? (

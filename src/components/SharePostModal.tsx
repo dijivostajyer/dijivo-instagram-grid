@@ -138,7 +138,7 @@ export default function SharePostModal({
         <div className="grid lg:grid-cols-2">
           {/* Medya: Reel video oynatıcı veya gönderi görseli (§11/§19) */}
           {isReel && post.videoUrl ? (
-            <div className="relative aspect-square w-full bg-black">
+            <div className="relative flex w-full items-center justify-center bg-black">
               {/* Autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
               <video
                 key={post.videoUrl}
@@ -147,18 +147,18 @@ export default function SharePostModal({
                 controls
                 playsInline
                 preload="metadata"
-                className="absolute inset-0 size-full object-contain"
+                className="block max-h-[80vh] w-full aspect-[9/16] object-contain"
                 aria-label={`Reel videosu: ${title}`}
                 onError={() => setVideoFailed(true)}
               />
             </div>
           ) : (
-            <div className="relative aspect-square w-full bg-neutral-100">
+            <div className="relative flex w-full items-center justify-center bg-neutral-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={post.imageUrl}
                 alt={title}
-                className="absolute inset-0 size-full object-cover"
+                className="block h-auto max-h-[80vh] w-full object-contain"
               />
             </div>
           )}

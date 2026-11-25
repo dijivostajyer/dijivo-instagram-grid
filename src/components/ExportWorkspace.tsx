@@ -21,7 +21,7 @@ export default function ExportWorkspace({
   options: ExportOptions;
   projectLabel: string;
 }) {
-  // PDF/JPG ile aynı yerleşim (Post 3:4, Reel 2:3; 9 hücre/sayfa).
+  // PDF/JPG ile aynı yerleşim (Post ve Reel 3:4; 9 hücre/sayfa).
   const { pageCount, cellsPerPage } = calculateExportLayout(result.cells);
 
   const rows: Array<{ label: string; value: string }> = [

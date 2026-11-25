@@ -11,6 +11,7 @@ import type { ExistingPost } from "@/lib/types";
 // iş akışını değiştirmez).
 vi.mock("@/lib/validators", () => ({
   MAX_VIDEO_BYTES: 100 * 1024 * 1024,
+  getMediaSizeAdvisory: vi.fn(() => null),
   loadImageFile: vi.fn(async (file: File) => {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       throw new Error("Desteklenmeyen dosya türü. Lütfen JPG, PNG veya WebP biçiminde bir görsel yükleyin.");

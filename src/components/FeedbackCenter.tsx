@@ -99,13 +99,13 @@ function aspectFor(type: FeedbackTargetType, preview: FeedbackPreview): string {
   return gridCellAspectClass(type === "reel" ? "reel" : preview.postType === "reel" ? "reel" : "post");
 }
 
-/** Post 3:4, Reel 2:3, Story 9:16, Tüm Grid ikon; medya yoksa güvenli yedek. */
+/** Post ve Reel 3:4, Story 9:16, Tüm Grid ikon; medya yoksa güvenli yedek. */
 function FeedbackThumb({ item, size }: { item: Pick<FeedbackCenterItem, "targetType" | "preview">; size: "sm" | "lg" }) {
   const [failed, setFailed] = useState(false);
   const { preview, targetType } = item;
   const width = size === "sm" ? "w-16" : "w-full max-w-[16rem]";
   // self-start: kartın flex satırı küçük resmi kart yüksekliğine uzatıp
-  // oranı (3:4 / 2:3 / 9:16) bozmasın.
+  // oranı (3:4 / 9:16) bozmasın.
   const frame = `${width} ${aspectFor(targetType, preview)} shrink-0 self-start overflow-hidden rounded-lg bg-neutral-100 ring-1 ring-black/5`;
   if (preview.kind === "grid") {
     return (

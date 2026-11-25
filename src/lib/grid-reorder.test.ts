@@ -190,6 +190,6 @@ describe("tek sıra kaynağı: share ve export", () => {
     const rects = calculateExportCellRects(grid.cells, calculateExportLayout(grid.cells));
     expect(rects[3].x).toBe(rects[0].x); // L1: 2. satır 1. kolon
     expect(rects[3].y).toBeGreaterThan(rects[0].y);
-    expect(rects[6].reel).toBe(true); // N2 Reel olarak 2:3 kalır
+    expect(rects[6].reel).toBe(true); // N2 Reel olarak işaretli kalır
   });
 });

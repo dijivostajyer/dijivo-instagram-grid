@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_IMAGE_BYTES,
   MAX_VIDEO_BYTES,
+  getMediaSizeAdvisory,
   loadVideoFile,
   looksLikeMp4,
   looksLikeWebm,
@@ -154,5 +155,34 @@ describe("reel video doğrulama (§3/§22)", () => {
     await expect(loadVideoFile(wrongType)).rejects.toThrow(
       "Desteklenmeyen dosya türü",
     );
+  });
+});
+
+describe("getMediaSizeAdvisory (engellemeyen boyut önerisi)", () => {
+  it("1080×1350 Post ve 1080×1920 Reel için uyarı üretmez", () => {
+    expect(getMediaSizeAdvisory(1080, 1350, "post")).toBeNull();
+    expect(getMediaSizeAdvisory(1080, 1920, "reel")).toBeNull();
+    expect(getMediaSizeAdvisory(2160, 2700, "post")).toBeNull(); // aynı oran, 2x
+  });
+
+  it("farklı oranda önerilen boyutu söyler", () => {
+    expect(getMediaSizeAdvisory(1080, 1080, "post")).toContain("1080 × 1350 px (4:5)");
+    expect(getMediaSizeAdvisory(1080, 1350, "reel")).toContain("1080 × 1920 px (9:16)");
+  });
+
+  it("boyut bilinmiyorsa sessizdir", () => {
+    expect(getMediaSizeAdvisory(undefined, undefined, "post")).toBeNull();
+    expect(getMediaSizeAdvisory(0, 0, "reel")).toBeNull();
+  });
+});
+
+describe("getMediaSizeAdvisory – düşük çözünürlük", () => {
+  it("oran doğru ama genişlik 1080'den küçükse çözünürlük uyarısı verir", () => {
+    expect(getMediaSizeAdvisory(540, 675, "post")).toContain("çözünürlük düşük");
+    expect(getMediaSizeAdvisory(720, 1280, "reel")).toContain("çözünürlük düşük");
+  });
+  it("1080 ve üzeri doğru oranda uyarı yok", () => {
+    expect(getMediaSizeAdvisory(1080, 1350, "post")).toBeNull();
+    expect(getMediaSizeAdvisory(2160, 3840, "reel")).toBeNull();
   });
 });

@@ -130,7 +130,7 @@ export async function verifyVideoBytes(
  * Orijinal dosya hiçbir biçimde değiştirilmez; yalnızca
  * tarayıcıda önizlenir. Hata durumunda URL geri alınır.
  */
-export async function loadVideoFile(file: File): Promise<{ url: string }> {
+export async function loadVideoFile(file: File): Promise<{ url: string; width?: number; height?: number }> {
   const validation = validateVideoFile(file);
   if (!validation.ok) throw new Error(validation.error);
   const url = URL.createObjectURL(file);
@@ -145,7 +145,32 @@ export async function loadVideoFile(file: File): Promise<{ url: string }> {
     URL.revokeObjectURL(url);
     throw error;
   }
-  return { url };
+  // Çözünürlük yalnızca bilgilendirme içindir; okunamazsa yükleme yine devam eder.
+  const size = await readVideoSize(url);
+  return { url, ...size };
+}
+
+/** `loadedmetadata` ile videonun gerçek piksel boyutunu okur; zaman aşımında/hatada boş döner. */
+function readVideoSize(url: string, timeoutMs = 5000): Promise<{ width?: number; height?: number }> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") return resolve({});
+    const video = document.createElement("video");
+    let settled = false;
+    const finish = (size: { width?: number; height?: number }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeAttribute("src");
+      video.load();
+      resolve(size);
+    };
+    const timer = setTimeout(() => finish({}), timeoutMs);
+    video.preload = "metadata";
+    video.muted = true;
+    video.onloadedmetadata = () => finish(video.videoWidth > 0 ? { width: video.videoWidth, height: video.videoHeight } : {});
+    video.onerror = () => finish({});
+    video.src = url;
+  });
 }
 
 /** Reel kapak görselini doğrular ve object URL'e çevirir (JPG/PNG/WebP). */
@@ -160,6 +185,34 @@ export async function loadCoverFile(file: File): Promise<{ url: string; alt: str
     throw error;
   }
   return { url, alt: file.name };
+}
+
+/** Önerilen medya boyutları (yalnızca bilgilendirme; dosya hiçbir zaman değiştirilmez). */
+export const RECOMMENDED_POST_SIZE = { width: 1080, height: 1350, label: "1080 × 1350 px (4:5)" } as const;
+export const RECOMMENDED_REEL_SIZE = { width: 1080, height: 1920, label: "1080 × 1920 px (9:16)" } as const;
+
+/**
+ * Önerilen oranla uyuşmayan medya için engellemeyen bir uyarı üretir; uyumluysa
+ * veya boyut bilinmiyorsa `null`. Yüklemeyi reddetmez, kırpmaz, yeniden boyutlandırmaz.
+ */
+export function getMediaSizeAdvisory(
+  width: number | undefined,
+  height: number | undefined,
+  kind: "post" | "reel",
+): string | null {
+  if (!width || !height) return null;
+  const target = kind === "reel" ? RECOMMENDED_REEL_SIZE : RECOMMENDED_POST_SIZE;
+  const ratio = width / height;
+  const targetRatio = target.width / target.height;
+  const name = kind === "reel" ? "Reel" : "Post";
+  if (Math.abs(ratio - targetRatio) / targetRatio > 0.02) {
+    return `${width}×${height} px; ${name} için önerilen boyut ${target.label}.`;
+  }
+  // Oran doğru ama gerçek piksel boyutu önerilenden küçük (düşük çözünürlük).
+  if (width < target.width) {
+    return `${width}×${height} px çözünürlük düşük; ${name} için önerilen boyut ${target.label}.`;
+  }
+  return null;
 }
 
 /** Yüklenen görselin tarayıcıda açılıp açılmadığını kontrol eder (decode testi). */
@@ -184,7 +237,7 @@ export function decodeImage(objectUrl: string): Promise<void> {
  */
 export async function loadImageFile(
   file: File,
-): Promise<{ url: string; alt: string; aspectRatio: "1:1" | "3:4" | "4:3" | "16:9" }> {
+): Promise<{ url: string; alt: string; aspectRatio: "1:1" | "3:4" | "4:3" | "16:9"; width?: number; height?: number }> {
   const validation = validateImageFile(file);
   if (!validation.ok) throw new Error(validation.error);
   const url = URL.createObjectURL(file);
@@ -195,7 +248,8 @@ export async function loadImageFile(
     throw error;
   }
   const aspectRatio = await detectAspectRatio(url);
-  return { url, alt: file.name, aspectRatio };
+  const size = await readImageSize(url);
+  return { url, alt: file.name, aspectRatio, ...size };
 }
 
 /** Kaynak oranını metadata olarak korur; grid önizlemesi Instagram gibi 1:1 kalır. */
@@ -210,6 +264,15 @@ function detectAspectRatio(url: string): Promise<"1:1" | "3:4" | "4:3" | "16:9">
       resolve(candidates.reduce((best, candidate) => Math.abs(ratio - candidate[0]) < Math.abs(ratio - best[0]) ? candidate : best)[1]);
     };
     image.onerror = () => resolve("1:1");
+    image.src = url;
+  });
+}
+
+function readImageSize(url: string): Promise<{ width?: number; height?: number }> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => resolve({});
     image.src = url;
   });
 }

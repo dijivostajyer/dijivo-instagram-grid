@@ -894,7 +894,7 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                     renderGrid={(args) => <SortableGrid {...args} onReorder={handleReorderGrid} />}
                   />
                   <p className="mt-3 text-sm text-neutral-500">
-                    Görseller merkezden kırpılır: Post 3:4, Reel 2:3 ({GRID_COLUMNS} sütun).
+                    Görseller merkezden kırpılır: Post ve Reel 3:4 ({GRID_COLUMNS} sütun).
                   </p>
                 </section>
               </div>

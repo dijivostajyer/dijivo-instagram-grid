@@ -300,7 +300,7 @@ export default function PostModal({
           </div>
 
           {isReel && post.videoUrl ? (
-            <div className="relative aspect-square w-full bg-black">
+            <div className="relative flex w-full items-center justify-center bg-black">
               {/* §7: autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
               <video
                 key={post.videoUrl}
@@ -309,18 +309,18 @@ export default function PostModal({
                 controls
                 playsInline
                 preload="metadata"
-                className="absolute inset-0 size-full object-contain"
+                className="block max-h-[80vh] w-full aspect-[9/16] object-contain"
                 aria-label="Reel video önizlemesi"
                 onError={() => setVideoFailed(true)}
               />
             </div>
           ) : (
-            <div className="relative aspect-square w-full bg-neutral-100">
+            <div className="relative flex w-full items-center justify-center bg-neutral-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={post.imageUrl}
                 alt={title}
-                className="absolute inset-0 size-full object-cover"
+                className="block h-auto max-h-[80vh] w-full object-contain"
               />
               {post.postType === "reel" ? (
                 <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/60 px-3 py-2 text-xs font-medium text-white">

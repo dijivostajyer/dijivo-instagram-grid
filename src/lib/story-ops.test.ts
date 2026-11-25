@@ -43,10 +43,10 @@ describe("story-ops", () => {
 });
 
 describe("grid-ratio", () => {
-  it("Post 3:4, Reel 2:3", () => {
+  it("Post ve Reel 3:4", () => {
     expect(gridCellAspectClass("post")).toBe("aspect-[3/4]");
     expect(gridCellAspectClass("carousel")).toBe("aspect-[3/4]");
     expect(gridCellAspectClass(undefined)).toBe("aspect-[3/4]");
-    expect(gridCellAspectClass("reel")).toBe("aspect-[2/3]");
+    expect(gridCellAspectClass("reel")).toBe("aspect-[3/4]");
   });
 });

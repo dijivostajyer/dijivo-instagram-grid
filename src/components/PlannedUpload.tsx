@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 
 import {
   MAX_VIDEO_BYTES,
+  getMediaSizeAdvisory,
   loadCoverFile,
   loadImageFile,
   loadVideoFile,
@@ -11,7 +12,7 @@ import {
 import type { PostType } from "@/lib/types";
 
 /** Reel video desteği metni (doğrulama limitiyle aynı kaynak, §3). */
-const REEL_HINT = `MP4 veya WebM · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB · Tek video`;
+const REEL_HINT = `MP4 veya WebM · Önerilen 1080 × 1920 px (9:16) · Maksimum ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB · Tek video`;
 
 /**
  * Planlanan gönderi yükleme formu (hata mesajlarıyla).
@@ -37,6 +38,7 @@ export default function PlannedUpload({
   const videoInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType>("post");
   // §3: Reel seçildiğinde kapak + video akışı (kapak isteğe bağlı).
   const [pendingCover, setPendingCover] = useState<{ url: string; alt: string } | null>(null);
@@ -50,15 +52,19 @@ export default function PlannedUpload({
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
     setError(null);
+    setNotice(null);
     setBusy(true);
     const failures: string[] = [];
+    const advisories: string[] = [];
     // Her yeni planlanan içerik yayın sırasının başına (planOrder 0)
     // eklendiği için seçilen dosya sırasının korunması üzere batch
     // ters sırada işlenir: ilk seçilen dosya en üstte sona erer.
     const batch = Array.from(files).reverse();
     for (const file of batch) {
       try {
-        const { url, alt, aspectRatio } = await loadImageFile(file);
+        const { url, alt, aspectRatio, width, height } = await loadImageFile(file);
+        const advisory = getMediaSizeAdvisory(width, height, "post");
+        if (advisory) advisories.push(`${file.name}: ${advisory}`);
         await onUpload(url, alt, postType, aspectRatio);
       } catch (e) {
         failures.push(`${file.name}: ${e instanceof Error ? e.message : "Görsel yüklenemedi."}`);
@@ -67,6 +73,7 @@ export default function PlannedUpload({
     if (failures.length) {
       setError(failures.join(" "));
     }
+    if (advisories.length) setNotice(`Boyut önerisi (yükleme yapıldı, dosya değiştirilmedi): ${advisories.join(" ")}`);
     setBusy(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -87,9 +94,12 @@ export default function PlannedUpload({
   async function handleVideoFile(file: File | undefined) {
     if (!file) return;
     setError(null);
+    setNotice(null);
     try {
-      const { url } = await loadVideoFile(file);
+      const { url, width, height } = await loadVideoFile(file);
       setPendingVideo({ url, name: file.name });
+      const advisory = getMediaSizeAdvisory(width, height, "reel");
+      setNotice(advisory ? `Boyut önerisi (video yüklendi, dosya değiştirilmedi): ${advisory}` : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Video yüklenemedi.");
     } finally {
@@ -157,6 +167,11 @@ export default function PlannedUpload({
           Birden fazla JPG, PNG veya WebP seçebilirsiniz.
         </p>
       ) : null}
+      {postType !== "reel" ? (
+        <p className="text-xs text-neutral-400">
+          Önerilen boyut: 1080 × 1350 px (4:5).
+        </p>
+      ) : null}
       {postType === "reel" ? (
         <div className="mt-2 rounded-xl border border-slate-200 p-3">
           <p className="mb-2 text-xs font-medium text-neutral-500">{REEL_HINT}</p>
@@ -210,6 +225,11 @@ export default function PlannedUpload({
             onChange={(e) => void handleVideoFile(e.target.files?.[0])}
           />
         </div>
+      ) : null}
+      {notice ? (
+        <p role="status" className="mt-2 text-xs text-amber-700">
+          {notice}
+        </p>
       ) : null}
       {error ? (
         <p role="alert" className="mt-2 text-xs font-medium text-red-600">
