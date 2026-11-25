@@ -1,15 +1,19 @@
 import { deleteStoredImage, isImageRef } from "./image-store";
+import { deleteStoredVideo, isVideoRef } from "./video-store";
 import type { PersistedAppState } from "./storage";
 
 type ObjectUrlRevoker = (objectUrl: string) => void;
 type StoredImageDeleter = (ref: string) => Promise<void>;
+type StoredVideoDeleter = (ref: string) => Promise<void>;
 
 function imageUrls(state: PersistedAppState): string[] {
   const collect = (brand: PersistedAppState["brand"], existingPosts: PersistedAppState["existingPosts"], plannedPosts: PersistedAppState["plannedPosts"]): Array<string | undefined> => [
     brand.profileImageUrl,
     ...(brand.highlights ?? []).map((highlight) => highlight.imageUrl),
-    ...existingPosts.map((post) => post.imageUrl),
-    ...plannedPosts.map((post) => post.imageUrl),
+    // Reel kapağı ve videosu da state'ten çıkınca (değiştir/kaldır/sil)
+    // geçici URL'leri serbest bırakılır ve IndexedDB Blob'ları temizlenir.
+    ...existingPosts.flatMap((post) => [post.imageUrl, post.coverImageUrl, post.videoUrl]),
+    ...plannedPosts.flatMap((post) => [post.imageUrl, post.coverImageUrl, post.videoUrl]),
   ];
   return [
     ...collect(state.brand, state.existingPosts, state.plannedPosts),
@@ -29,7 +33,7 @@ function activeImageRefs(
 ): Set<string> {
   const refs = new Set<string>();
   for (const url of imageUrls(state)) {
-    if (isImageRef(url)) refs.add(url);
+    if (isImageRef(url) || isVideoRef(url)) refs.add(url);
     const ref = refByObjectUrl.get(url);
     if (ref !== undefined) refs.add(ref);
   }
@@ -47,6 +51,7 @@ export async function cleanUpRemovedImages({
   trackedObjectUrls,
   revokeObjectUrl = URL.revokeObjectURL,
   deleteStoredImage: removeStoredImage = deleteStoredImage,
+  deleteStoredVideo: removeStoredVideo = deleteStoredVideo,
 }: {
   previousState: PersistedAppState;
   nextState: PersistedAppState;
@@ -54,6 +59,7 @@ export async function cleanUpRemovedImages({
   trackedObjectUrls: Set<string>;
   revokeObjectUrl?: ObjectUrlRevoker;
   deleteStoredImage?: StoredImageDeleter;
+  deleteStoredVideo?: StoredVideoDeleter;
 }): Promise<void> {
   const nextObjectUrls = activeObjectUrls(nextState);
   const removedObjectUrls = [...activeObjectUrls(previousState)].filter(
@@ -77,7 +83,8 @@ export async function cleanUpRemovedImages({
   for (const ref of refsToDelete) {
     if (refsStillInUse.has(ref)) continue;
     try {
-      await removeStoredImage(ref);
+      if (isVideoRef(ref)) await removeStoredVideo(ref);
+      else await removeStoredImage(ref);
     } catch (error) {
       console.warn("[persistence] Kalıcı görsel silinemedi:", error);
     }

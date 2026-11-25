@@ -15,6 +15,7 @@ import DashboardOverview from "@/components/DashboardOverview";
 import ExistingPostList from "@/components/ExistingPostList";
 import ExportWorkspace from "@/components/ExportWorkspace";
 import FeedbackCenter, { type FeedbackTargetLink } from "@/components/FeedbackCenter";
+import { createVideoPoster } from "@/lib/validators";
 import { createHttpFeedbackCenterSource } from "@/lib/feedback-center-client";
 import { createHttpBackupSource } from "@/lib/backup/client";
 import { consumeRestoreNotice } from "@/lib/backup/restore-sync";
@@ -269,6 +270,41 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
         posts.map((post) =>
           post.id === selectedPlanned.id ? { ...post, coverImageUrl: url } : post,
         ),
+      );
+    }
+  }
+
+  // R2: videoyu kaldır. Gönderi mevcut görseliyle (kapak veya otomatik kare)
+  // görselli Reel olarak kalır; kaldırılan video yaşam döngüsüyle temizlenir.
+  async function handleRemovePostVideo() {
+    if (selectedExisting) {
+      setExistingPosts((posts) =>
+        posts.map((post) => (post.id === selectedExisting.id ? { ...post, videoUrl: undefined, mediaType: undefined } : post)),
+      );
+    } else if (selectedPlanned) {
+      setPlannedPosts((posts) =>
+        posts.map((post) => (post.id === selectedPlanned.id ? { ...post, videoUrl: undefined, mediaType: undefined } : post)),
+      );
+    }
+  }
+
+  // R2: kapağı kaldır. Grid görseli videonun ilk karesinden (ayrı görsel)
+  // üretilir; üretilemezse kapak korunur ve anlaşılır hata verilir.
+  async function handleRemovePostCover() {
+    const target = selectedExisting ?? selectedPlanned;
+    if (!target?.videoUrl) throw new Error("Kapak kaldırılamadı: gönderide video yok.");
+    const poster = await createVideoPoster(target.videoUrl);
+    if (!poster) {
+      throw new Error("Kapak kaldırılamadı: videodan otomatik görsel alınamadı. Kapağı değiştirmeyi deneyin.");
+    }
+    await persistUpload(poster.url);
+    if (selectedExisting) {
+      setExistingPosts((posts) =>
+        posts.map((post) => (post.id === selectedExisting.id ? { ...post, imageUrl: poster.url, coverImageUrl: undefined } : post)),
+      );
+    } else if (selectedPlanned) {
+      setPlannedPosts((posts) =>
+        posts.map((post) => (post.id === selectedPlanned.id ? { ...post, imageUrl: poster.url, coverImageUrl: undefined } : post)),
       );
     }
   }
@@ -988,6 +1024,8 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
                 : undefined
           }
           onChangeImage={handleChangePostImage}
+          onRemoveVideo={handleRemovePostVideo}
+          onRemoveCover={handleRemovePostCover}
           onChangeVideo={handleChangePostVideo}
           onChangeCover={handleChangePostCover}
           onCopy={handleCopyPost}

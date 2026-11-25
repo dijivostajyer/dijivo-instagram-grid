@@ -2,13 +2,8 @@
 
 import { useRef, useState } from "react";
 
-import {
-  MAX_VIDEO_BYTES,
-  getMediaSizeAdvisory,
-  loadCoverFile,
-  loadImageFile,
-  loadVideoFile,
-} from "@/lib/validators";
+import ReelDraftEditor from "./ReelDraftEditor";
+import { MAX_VIDEO_BYTES, getMediaSizeAdvisory, loadImageFile } from "@/lib/validators";
 import type { PostType } from "@/lib/types";
 
 /** Reel video desteği metni (doğrulama limitiyle aynı kaynak, §3). */
@@ -34,21 +29,10 @@ export default function PlannedUpload({
   ) => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const coverInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType>("post");
-  // §3: Reel seçildiğinde kapak + video akışı (kapak isteğe bağlı).
-  const [pendingCover, setPendingCover] = useState<{ url: string; alt: string } | null>(null);
-  const [pendingVideo, setPendingVideo] = useState<{ url: string; name: string } | null>(null);
-
-  function resetReelDraft() {
-    setPendingCover(null);
-    setPendingVideo(null);
-  }
-
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
     setError(null);
@@ -78,55 +62,6 @@ export default function PlannedUpload({
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function handleCoverFile(file: File | undefined) {
-    if (!file) return;
-    setError(null);
-    try {
-      const { url, alt } = await loadCoverFile(file);
-      setPendingCover({ url, alt });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Kapak görseli yüklenemedi.");
-    } finally {
-      if (coverInputRef.current) coverInputRef.current.value = "";
-    }
-  }
-
-  async function handleVideoFile(file: File | undefined) {
-    if (!file) return;
-    setError(null);
-    setNotice(null);
-    try {
-      const { url, width, height } = await loadVideoFile(file);
-      setPendingVideo({ url, name: file.name });
-      const advisory = getMediaSizeAdvisory(width, height, "reel");
-      setNotice(advisory ? `Boyut önerisi (video yüklendi, dosya değiştirilmedi): ${advisory}` : null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Video yüklenemedi.");
-    } finally {
-      if (videoInputRef.current) videoInputRef.current.value = "";
-    }
-  }
-
-  async function handleAddReel() {
-    if (!pendingVideo) return;
-    setError(null);
-    setBusy(true);
-    try {
-      await onUpload(
-        pendingCover ? pendingCover.url : pendingVideo.url,
-        pendingCover ? pendingCover.alt : pendingVideo.name,
-        "reel",
-        "1:1",
-        { videoUrl: pendingVideo.url, coverImageUrl: pendingCover ? pendingCover.url : undefined },
-      );
-      resetReelDraft();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Reel eklenemedi.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
@@ -145,7 +80,6 @@ export default function PlannedUpload({
           value={postType}
           onChange={(event) => {
             setPostType(event.target.value as PostType);
-            resetReelDraft();
           }}
           className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-sky-600 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-600"
         >
@@ -173,58 +107,19 @@ export default function PlannedUpload({
         </p>
       ) : null}
       {postType === "reel" ? (
-        <div className="mt-2 rounded-xl border border-slate-200 p-3">
-          <p className="mb-2 text-xs font-medium text-neutral-500">{REEL_HINT}</p>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => coverInputRef.current?.click()}
-              className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
-            >
-              {pendingCover ? "Kapak değiştir" : "Kapak görseli yükle"}
-            </button>
-            <button
-              type="button"
-              onClick={() => videoInputRef.current?.click()}
-              className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
-            >
-              {pendingVideo ? "Videoyu değiştir" : "Video dosyası yükle"}
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {pendingCover ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={pendingCover.url} alt="Reel kapak önizlemesi" className="size-12 rounded-lg object-cover outline-1 -outline-offset-1 outline-black/10" />
-            ) : null}
-            {pendingVideo ? (
-              <span className="max-w-40 truncate rounded-lg bg-neutral-100 px-2 py-1 text-xs text-neutral-600">
-                {pendingVideo.name}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void handleAddReel()}
-              disabled={!pendingVideo || busy}
-              className="inline-flex h-8 items-center rounded-lg bg-neutral-900 px-3 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
-            >
-              Reel ekle
-            </button>
-          </div>
-          <input
-            ref={coverInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={(e) => void handleCoverFile(e.target.files?.[0])}
-          />
-          <input
-            ref={videoInputRef}
-            type="file"
-            accept="video/mp4,video/webm"
-            className="hidden"
-            onChange={(e) => void handleVideoFile(e.target.files?.[0])}
-          />
-        </div>
+        <ReelDraftEditor
+          hint={REEL_HINT}
+          disabled={busy}
+          onAdd={(draft) =>
+            onUpload(
+              draft.coverUrl ?? draft.posterUrl ?? draft.videoUrl,
+              draft.coverUrl ? (draft.coverAlt ?? draft.videoName) : draft.videoName,
+              "reel",
+              "1:1",
+              { videoUrl: draft.videoUrl, coverImageUrl: draft.coverUrl },
+            )
+          }
+        />
       ) : null}
       {notice ? (
         <p role="status" className="mt-2 text-xs text-amber-700">

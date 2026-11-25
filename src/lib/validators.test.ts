@@ -107,7 +107,7 @@ describe("reel video doğrulama (§3/§22)", () => {
   });
 
   it("desteklenmeyen video türü ve boş dosya reddedilir", () => {
-    const wrongType = validateVideoFile(fakeVideoFile("video/quicktime", 1000));
+    const wrongType = validateVideoFile(fakeVideoFile("video/x-msvideo", 1000));
     expect(wrongType.ok).toBe(false);
     if (!wrongType.ok) expect(wrongType.error).toContain("Desteklenmeyen");
     const empty = validateVideoFile(fakeVideoFile("video/mp4", 0));
@@ -184,5 +184,23 @@ describe("getMediaSizeAdvisory – düşük çözünürlük", () => {
   it("1080 ve üzeri doğru oranda uyarı yok", () => {
     expect(getMediaSizeAdvisory(1080, 1350, "post")).toBeNull();
     expect(getMediaSizeAdvisory(2160, 3840, "reel")).toBeNull();
+  });
+});
+
+describe("MOV (iPhone/QuickTime) yönlendirmesi", () => {
+  it("video/quicktime anlaşılır bir MP4 dönüştürme mesajı verir", () => {
+    const result = validateVideoFile(fakeVideoFile("video/quicktime", 1000));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("MOV");
+      expect(result.error).toContain("MP4");
+    }
+  });
+
+  it(".mov uzantılı dosya (boş MIME) aynı mesajı alır", () => {
+    const file = { type: "", size: 1000, name: "Klip.MOV" } as unknown as File;
+    const result = validateVideoFile(file);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("MOV");
   });
 });

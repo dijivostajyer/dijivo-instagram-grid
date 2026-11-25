@@ -85,6 +85,14 @@ export function looksLikeWebm(bytes: Uint8Array): boolean {
  */
 export function validateVideoFile(file: File): VideoValidationResult {
   if (!SUPPORTED_VIDEO_TYPES.includes(file.type as never)) {
+    // iPhone/QuickTime (.mov) sık karşılaşılan bir durum: dönüştürme yönlendirmesi.
+    if (file.type === "video/quicktime" || /\.mov$/i.test(file.name ?? "")) {
+      return {
+        ok: false,
+        error:
+          "MOV biçimi desteklenmiyor. Lütfen videoyu MP4 (H.264) biçimine dönüştürüp yeniden yükleyin.",
+      };
+    }
     return {
       ok: false,
       error:
@@ -174,7 +182,7 @@ function readVideoSize(url: string, timeoutMs = 5000): Promise<{ width?: number;
 }
 
 /** Reel kapak görselini doğrular ve object URL'e çevirir (JPG/PNG/WebP). */
-export async function loadCoverFile(file: File): Promise<{ url: string; alt: string }> {
+export async function loadCoverFile(file: File): Promise<{ url: string; alt: string; width?: number; height?: number }> {
   const validation = validateImageFile(file);
   if (!validation.ok) throw new Error(validation.error);
   const url = URL.createObjectURL(file);
@@ -184,7 +192,8 @@ export async function loadCoverFile(file: File): Promise<{ url: string; alt: str
     URL.revokeObjectURL(url);
     throw error;
   }
-  return { url, alt: file.name };
+  const size = await readImageSize(url);
+  return { url, alt: file.name, ...size };
 }
 
 /** Önerilen medya boyutları (yalnızca bilgilendirme; dosya hiçbir zaman değiştirilmez). */
@@ -275,4 +284,70 @@ function readImageSize(url: string): Promise<{ width?: number; height?: number }
     image.onerror = () => resolve({});
     image.src = url;
   });
+}
+
+/**
+ * Videonun ilk okunabilir karesinden AYRI bir JPEG görsel (object URL) üretir.
+ * Video dosyasına dokunulmaz; üretilen görsel yalnızca grid küçük görseli
+ * olarak kullanılır (kapak değildir). Üretilemezse (zaman aşımı, kod çözme
+ * hatası, CORS) `null` döner; çağıran taraf güvenli bir yedeğe düşer.
+ */
+export function createVideoPoster(
+  videoUrl: string,
+  timeoutMs = 8000,
+): Promise<{ url: string; width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") return resolve(null);
+    const video = document.createElement("video");
+    let settled = false;
+    const finish = (value: { url: string; width: number; height: number } | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeAttribute("src");
+      video.load();
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    // Uzak (imzalı) URL'de canvas kirlenmesin diye CORS istenir; blob:/data: için gerekmez.
+    if (!videoUrl.startsWith("blob:") && !videoUrl.startsWith("data:")) video.crossOrigin = "anonymous";
+    video.onerror = () => finish(null);
+    video.onloadeddata = () => {
+      video.currentTime = Math.min(0.1, (video.duration || 1) / 2);
+    };
+    video.onseeked = () => {
+      try {
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        if (!width || !height) return finish(null);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) return finish(null);
+        context.drawImage(video, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => finish(blob ? { url: URL.createObjectURL(blob), width, height } : null),
+          "image/jpeg",
+          0.9,
+        );
+      } catch {
+        finish(null);
+      }
+    };
+    video.src = videoUrl;
+  });
+}
+
+/** Object URL'i güvenle serbest bırakır (blob: değilse veya ortam desteklemiyorsa sessizce geçer). */
+export function safeRevokeObjectUrl(url: string | undefined): void {
+  if (!url || !url.startsWith("blob:")) return;
+  try {
+    URL.revokeObjectURL(url);
+  } catch {
+    /* jsdom vb. ortamlarda desteklenmeyebilir */
+  }
 }
