@@ -103,7 +103,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     console.info("[share] POST payload doğrulandı", { requestId, cells: portableInput.cells.length, bodyBytes, hasVideo: portableInput.cells.some((cell) => Boolean(cell.videoUrl)), stories: portableInput.stories?.length ?? 0, hasContext: Boolean(portableInput.context) });
     const snapshot = await getShareStore().create(portableInput, { ownerId: authentication.userId });
-    console.info("[share] Snapshot oluşturuldu", { requestId, token: snapshot.token, cells: input.cells.length });
+    // Token taşıyıcı bir yetkidir: loglara yazılmaz; olay requestId ile izlenir.
+    console.info("[share] Snapshot oluşturuldu", { requestId, cells: input.cells.length });
     return NextResponse.json({ token: snapshot.token, requestId }, { status: 201 });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "bilinmeyen hata";
