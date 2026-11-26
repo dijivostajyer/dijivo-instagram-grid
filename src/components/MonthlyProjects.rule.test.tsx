@@ -1,11 +1,20 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import MonthlyProjects from "./MonthlyProjects";
 import type { GridProject } from "@/lib/storage";
 
-afterEach(() => cleanup());
+// Form varsayılanı (ay/yıl) gerçek saatten gelir; testler gerçek tarihe bağlı olmasın diye
+// yalnızca Date sabitlenir (zamanlayıcılar gerçek kalır).
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function project(id: string, month: number, year: number, brandId = "brand-a"): GridProject {
   return {
