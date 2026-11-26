@@ -8,6 +8,7 @@ import type { GridProject, PersistedAppState } from "./storage";
 import type { Brand, ExistingPost, PlannedPost, Story } from "./types";
 import { isWorkspaceMediaRef, uploadWorkspaceMedia, workspaceMediaPath, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
 import { isInstagramPostUrl } from "./reel-media";
+import { isProjectMonthConflict } from "./project-ops";
 import { brandFingerprint, postFingerprint, type MediaMapper, type PushScope, type SyncFingerprints } from "./workspace-sync";
 
 type BrandRow = Record<string, unknown>;
@@ -267,6 +268,17 @@ export function buildStoryRows(userId: string, projects: readonly GridProject[])
   });
 }
 
+/**
+ * workspace_projects (user_id, brand_id, month, year) benzersizlik kuralı ihlal edildi:
+ * aynı marka için aynı ay planı başka bir kayıtla zaten var. Ağ/yetki hatalarından ayırt edilir.
+ */
+export class ProjectMonthConflictError extends Error {
+  constructor() {
+    super("Aynı marka için aynı ay planı zaten mevcut.");
+    this.name = "ProjectMonthConflictError";
+  }
+}
+
 export async function pushWorkspace(
   user: User,
   input: PersistedAppState,
@@ -288,7 +300,7 @@ export async function pushWorkspace(
   if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw new Error(`workspace_brands yazılamadı: ${error.message}`); }
   const projects = state.projects ?? [];
   const projectRows = projects.filter((project) => inScope(only?.projectIds, project.id));
-  if (projectRows.length) { const { error } = await db.from("workspace_projects").upsert(projectRows.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) throw new Error(`workspace_projects yazılamadı: ${error.message}`); }
+  if (projectRows.length) { const { error } = await db.from("workspace_projects").upsert(projectRows.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) { if (isProjectMonthConflict(error)) throw new ProjectMonthConflictError(); throw new Error(`workspace_projects yazılamadı: ${error.message}`); } }
   const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].filter((post) => inScope(only?.postIds, post.id)).map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl), external_url: post.externalUrl ?? null, grid_order: post.gridOrder ?? null })));
   if (postRows.length) {
     const { data, error } = await upsertPostRows(db, postRows);

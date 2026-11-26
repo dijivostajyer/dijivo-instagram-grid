@@ -1,5 +1,5 @@
 import { addExistingPost, addPlannedPost, pinPost } from "./post-ops";
-import { findPreviousMonthProject, monthLabel } from "./project-ops";
+import { duplicateMonthMessage, findPreviousMonthProject, findProjectForMonth, monthLabel, projectBrandId } from "./project-ops";
 import {
   STORAGE_VERSION,
   type GridProject,
@@ -335,6 +335,48 @@ export function removeBrandState(current: PersistedAppState, id: string): Persis
 }
 
 /**
+ * Veritabanı (user_id, brand_id, month, year) kuralını reddettikten sonra yerel durumu
+ * buluttaki gerçek listeyle uzlaştırır: aynı marka/ay/yıl için BAŞKA kimlikle zaten kayıtlı
+ * bir uzak plan varsa, yereldeki çakışan (hiç kaydedilememiş) plan sahte kayıt olarak
+ * atılır ve yerine uzaktaki mevcut plan alınır. Çakışmayan her şey olduğu gibi korunur.
+ */
+export function resolveProjectMonthConflicts(
+  local: PersistedAppState,
+  remote: PersistedAppState,
+): { state: PersistedAppState; dropped: GridProject[] } {
+  const localProjects = local.projects ?? [];
+  const remoteProjects = remote.projects ?? [];
+  const kept: GridProject[] = [];
+  const dropped: GridProject[] = [];
+  const replacements: GridProject[] = [];
+  for (const project of localProjects) {
+    const clash = remoteProjects.find(
+      (item) =>
+        item.id !== project.id &&
+        projectBrandId(item) === projectBrandId(project) &&
+        item.month === project.month &&
+        item.year === project.year,
+    );
+    if (!clash) {
+      kept.push(project);
+      continue;
+    }
+    dropped.push(project);
+    if (!localProjects.some((item) => item.id === clash.id) && !replacements.some((item) => item.id === clash.id)) {
+      replacements.push(clash);
+    }
+  }
+  if (!dropped.length) return { state: local, dropped };
+  const projects = [...kept, ...replacements];
+  const base: PersistedAppState = { ...local, projects };
+  if (!dropped.some((project) => project.id === local.activeProjectId)) return { state: base, dropped };
+  const sameBrand = (project: GridProject) => projectBrandId(project) === local.activeBrandId;
+  const target = replacements.find(sameBrand) ?? kept.find(sameBrand) ?? replacements[0] ?? kept[0];
+  const selected = target ? selectProjectState(base, target.id) : null;
+  return { state: selected ?? base, dropped };
+}
+
+/**
  * Aylık plan oluşturur (§4/§19). "Önceki ayı kopyala" yalnızca
  * aynı marka içinde kalır; başka marka asla otomatik kaynak
  * olarak seçilmez. Kaynak marka verisi kayıt defterinden gelir.
@@ -348,6 +390,14 @@ export function createProjectState(
 ): { state: PersistedAppState; projectId: string } | { error: string } {
   const synced = syncActiveProject(current);
   const brandId = synced.activeBrandId ?? "";
+  if (!brandId) return { error: "Aylık plan oluşturmak için önce bir marka seçin." };
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 2000) {
+    return { error: "Geçerli bir ay ve yıl seçin." };
+  }
+  // Veritabanı kuralı: aynı marka + ay + yıl için tek plan. Yerel sahte kayıt oluşmaz.
+  if (findProjectForMonth(synced.projects ?? [], brandId, month, year)) {
+    return { error: duplicateMonthMessage(month, year) };
+  }
   const scopedProjects = (synced.projects ?? []).filter(
     (project) => project.brandId === brandId,
   );

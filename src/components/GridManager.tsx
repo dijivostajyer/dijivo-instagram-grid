@@ -681,6 +681,8 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
             {view === "plans" ? (
               <MonthlyProjects
                 projects={projects}
+                brandId={activeBrandId ?? undefined}
+                loading={!ready}
                 activeProjectId={activeProjectId}
                 shareLink={shareController.link}
                 onOpen={openProject}

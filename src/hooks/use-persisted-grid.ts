@@ -40,12 +40,14 @@ import {
   selectBrandState,
   selectProjectState,
   removeBrandState,
+  resolveProjectMonthConflicts,
   syncActiveProject,
   updateBrandState,
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
+import { duplicateMonthMessage } from "../lib/project-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
-import { pullWorkspace, pushWorkspace, reconcileWorkspaceState, type WorkspaceMediaUploadCache } from "../lib/workspace-store";
+import { ProjectMonthConflictError, pullWorkspace, pushWorkspace, reconcileWorkspaceState, type WorkspaceMediaUploadCache } from "../lib/workspace-store";
 import {
   duplicateWorkspaceMedia,
   isWorkspaceMediaRef,
@@ -330,8 +332,39 @@ export function usePersistedGrid(): PersistedGrid {
   const pendingPushesRef = useRef(0);
   const unsyncedRef = useRef(false);
   const refreshingRef = useRef(false);
+  // Aynı ay planı çakışması bildirimi: sonraki başarılı eşitleme hata bandını silmesin.
+  const planConflictNoticeRef = useRef<string | null>(null);
 
   stateRef.current = state;
+
+  // Veritabanı aynı marka/ay/yıl için ikinci planı reddetti (eşzamanlı istek veya eski veri):
+  // buluttaki gerçek liste yeniden okunur, hiç kaydedilememiş yerel plan sahte kayıt olarak
+  // atılır ve kullanıcıya Türkçe açıklama gösterilir. Başka hiçbir veri atılmaz.
+  const recoverProjectMonthConflict = useCallback(async () => {
+    const user = workspaceUserRef.current;
+    const fallback = "Aynı marka için aynı ay planı zaten mevcut; plan listesi yeniden yüklenemedi. Sayfayı yenileyip farklı bir ay seçin.";
+    try {
+      const remote = user ? await pullWorkspace(user) : null;
+      if (!remote) {
+        planConflictNoticeRef.current = fallback;
+        setSyncError(fallback);
+        return;
+      }
+      const hydratedRemote = await hydrateState(remote, refByObjectUrl.current, trackedObjectUrls.current);
+      const { state: next, dropped } = resolveProjectMonthConflicts(stateRef.current, hydratedRemote);
+      const message = dropped.length ? duplicateMonthMessage(dropped[0].month, dropped[0].year) : fallback;
+      planConflictNoticeRef.current = message;
+      setSyncError(message);
+      if (dropped.length) {
+        stateRef.current = next;
+        setState(next);
+      }
+    } catch (error) {
+      console.error("[workspace] Plan çakışması sonrası liste yeniden yüklenemedi.", error instanceof Error ? error.name : "UnknownError");
+      planConflictNoticeRef.current = fallback;
+      setSyncError(fallback);
+    }
+  }, []);
 
   // Medya URL'sini kanonik referansa indirger (imzalı URL → storage ref); yerel
   // blob URL'leri kendi değerinde kalır, böylece görsel değişimi de fark edilir.
@@ -500,12 +533,17 @@ export function usePersistedGrid(): PersistedGrid {
           baselineRef.current = currentFingerprints;
           writeBaseline(browserStorage, user.id, currentFingerprints);
           if (sequence === syncSequenceRef.current) {
-            setSyncError(null);
+            setSyncError(planConflictNoticeRef.current);
             unsyncedRef.current = false;
             writeSyncClean(browserStorage, user.id, true);
           }
         })
         .catch((error) => {
+          if (error instanceof ProjectMonthConflictError) {
+            console.warn("[workspace] Aynı marka/ay planı çakışması; bulut listesi yeniden yüklenecek.");
+            void recoverProjectMonthConflict();
+            return;
+          }
           const detail = error instanceof Error ? error.message : "Bilinmeyen hata";
           console.error("[workspace] Uzak sync başarısız; yerel kopya korundu.", error);
           if (sequence === syncSequenceRef.current) {
@@ -516,7 +554,7 @@ export function usePersistedGrid(): PersistedGrid {
           pendingPushesRef.current -= 1;
         });
     }
-  }, [state, ready, uploadTick, canonicalMedia]);
+  }, [state, ready, uploadTick, canonicalMedia, recoverProjectMonthConflict]);
 
   // Başka cihazda yapılan değişiklikleri görmek için: sekme tekrar görünür/odaklı
   // olunca ve düzenli aralıkla uzak veri çekilir. Yalnız yerelde bekleyen/başarısız
@@ -877,6 +915,7 @@ export function usePersistedGrid(): PersistedGrid {
   const createProject = useCallback((name: string, month: number, year: number, copyPrevious: boolean): string | null => {
     const result = createProjectState(stateRef.current, name, month, year, copyPrevious);
     if ("error" in result) return result.error;
+    planConflictNoticeRef.current = null;
     commit(result.state);
     if (copyPrevious) void detachCopiedStoryMedia(result.projectId);
     return null;
