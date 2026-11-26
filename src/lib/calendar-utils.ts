@@ -276,11 +276,17 @@ export function validateCalendarInput(input: {
  * ve form paylaşımı için saf fonksiyondur.
  */
 export function validateCalendarPatch(patch: {
+  /** Alan hiç gönderilmediyse `undefined`; bağlantıyı kaldırmak için `null`; aksi halde yalnız dize kabul edilir. */
+  postId?: unknown;
   title?: string;
   scheduledAt?: string;
   status?: CalendarStatus;
   itemType?: CalendarItemType;
 }): string | null {
+  // postId: eksik (undefined) ve null (bağlantıyı kaldır) serbest; dize dışı hiçbir tür sessizce dönüştürülmez, reddedilir.
+  if (patch.postId !== undefined && patch.postId !== null && typeof patch.postId !== "string") {
+    return "Geçersiz gönderi bağlantısı.";
+  }
   if (patch.title !== undefined && !patch.title.trim()) {
     return "Başlık gerekli.";
   }

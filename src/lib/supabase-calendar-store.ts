@@ -6,6 +6,7 @@ import {
 } from "./calendar-types";
 import {
   CalendarAccessError,
+  CalendarStorageError,
   type CalendarItemInput,
   type CalendarPatch,
 } from "./calendar-store";
@@ -225,8 +226,13 @@ export class SupabaseCalendarStore implements CalendarStoreLike {
   }
 }
 
-function accessError(error: unknown, fallback: string): CalendarAccessError {
+/**
+ * Sürücü hatalarını sınıflar: "bulunamadı" istemci hatasıdır (404); diğer tüm veritabanı hataları depo hatasıdır
+ * (API katmanında genel, ayrıntısız 500). Doğrulama hataları `CalendarAccessError` olarak zaten ayrıca atılır.
+ */
+function accessError(error: unknown, fallback: string): CalendarAccessError | CalendarStorageError {
   const message = error instanceof Error ? error.message : fallback;
-  return new CalendarAccessError(message || fallback);
+  if (message.includes("bulunamadı")) return new CalendarAccessError(message);
+  return new CalendarStorageError(message || fallback);
 }
 

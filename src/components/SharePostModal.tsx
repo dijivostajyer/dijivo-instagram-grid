@@ -1,5 +1,7 @@
 "use client";
 
+import CaptionText from "./CaptionText";
+import ReelVideoWithCover from "./ReelVideoWithCover";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookmarkIcon,
@@ -12,7 +14,7 @@ import {
 } from "@heroicons/react/16/solid";
 
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
-import { isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
+import { getReelCoverUrl, isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
 import type { Brand, ExistingPost, PlannedPost } from "@/lib/types";
 
 /**
@@ -51,7 +53,6 @@ export default function SharePostModal({
   const externalUrl = post.externalUrl ?? (isInstagramPostUrl(post.videoUrl) ? post.videoUrl : undefined);
   const title = post.alt ?? post.id;
   const caption = post.caption ?? "";
-  const captionParts = caption.split(/(#[\p{L}\d_]+)/gu);
 
   // §11: modal kapanınca video durur, playback baştan başlar.
   function stopVideo() {
@@ -138,27 +139,21 @@ export default function SharePostModal({
         <div className="grid lg:grid-cols-2">
           {/* Medya: Reel video oynatıcı veya gönderi görseli (§11/§19) */}
           {isReel && post.videoUrl ? (
-            <div className="relative aspect-square w-full bg-black">
-              {/* Autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
-              <video
-                key={post.videoUrl}
-                ref={videoRef}
-                src={post.videoUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="absolute inset-0 size-full object-contain"
-                aria-label={`Reel videosu: ${title}`}
-                onError={() => setVideoFailed(true)}
-              />
-            </div>
+            <ReelVideoWithCover
+              videoUrl={post.videoUrl}
+              coverUrl={getReelCoverUrl(post)}
+              title={title}
+              videoRef={videoRef}
+              videoAriaLabel={`Reel videosu: ${title}`}
+              onVideoError={() => setVideoFailed(true)}
+            />
           ) : (
-            <div className="relative aspect-square w-full bg-neutral-100">
+            <div className="relative flex w-full items-center justify-center bg-neutral-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={post.imageUrl}
                 alt={title}
-                className="absolute inset-0 size-full object-cover"
+                className="block h-auto max-h-[80vh] w-full object-contain"
               />
             </div>
           )}
@@ -182,20 +177,9 @@ export default function SharePostModal({
               <span className="flex-1" />
               <BookmarkIcon className="size-6" aria-hidden="true" />
             </div>
-            <p className="text-sm leading-relaxed">
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
               <span className="font-semibold">{brand.username}</span>{" "}
-              {captionParts.map((part, index) =>
-                part.startsWith("#") ? (
-                  <span
-                    key={index}
-                    className="text-sky-700 dark:text-sky-400"
-                  >
-                    {part}{" "}
-                  </span>
-                ) : (
-                  <span key={index}>{part}</span>
-                ),
-              )}
+              <CaptionText caption={caption} />
             </p>
             {/* §19: carousel ileride multi-image genişletilebilir;
                 bu fazda tek görsel + caption ile açılır. */}

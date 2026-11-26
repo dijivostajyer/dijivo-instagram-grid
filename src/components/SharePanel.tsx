@@ -107,6 +107,15 @@ export function useShareController(
     setBusy(true);
     try {
       const response = await fetch(withBasePath(`/api/shares/${token}`), { method: "DELETE", headers: await authHeaders() });
+      // 404: bağlantı iptal edilmiş, süresi dolmuş, bulunamıyor ya da kullanıcıya ait değil (API bilgi sızdırmamak için
+      // hepsini 404 ile yanıtlar). Nedeni bilinmediğinden mesaj kesinlik taşımaz; yerel token yine temizlenir.
+      // 401/403/500 ve ağ hatası başarı sayılmaz.
+      if (response.status === 404) {
+        setLink(null);
+        setToken(null);
+        setMessage("Bağlantı bulunamadı. Kaldırılmış, süresi dolmuş veya size ait olmayabilir.");
+        return;
+      }
       if (!response.ok) throw new Error("Paylaşım bağlantısı kaldırılamadı.");
       setLink(null);
       setToken(null);

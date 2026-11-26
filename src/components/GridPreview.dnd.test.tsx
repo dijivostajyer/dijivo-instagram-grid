@@ -193,9 +193,9 @@ describe("GridPreview sürükle-bırak entegrasyonu", () => {
     expect(screen.getByRole("button", { name: "N1" }).getAttribute("aria-roledescription")).toBeNull();
   });
 
-  it("Reel kartı sürüklenebilir gridde de 2:3, Post 3:4 kalır", () => {
+  it("Reel kartı sürüklenebilir gridde de Post gibi 3:4", () => {
     render(<GridPreview brand={brand} result={grid} renderGrid={(args) => <SortableGrid {...args} onReorder={vi.fn()} />} />);
-    expect(screen.getByRole("button", { name: "N2" }).className).toContain("aspect-[2/3]");
+    expect(screen.getByRole("button", { name: "N2" }).className).toContain("aspect-[3/4]");
     expect(screen.getByRole("button", { name: "N1" }).className).toContain("aspect-[3/4]");
     expect(screen.getByRole("button", { name: "N1" }).getAttribute("aria-roledescription")).toBe("sortable");
   });

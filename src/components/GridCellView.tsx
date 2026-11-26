@@ -124,7 +124,7 @@ export default function GridCellView({
           <span className="text-xs text-red-500">Görsel yüklenemedi</span>
         </div>
       ) : null}
-      {/* Hücre oranında (Post 3:4, Reel 2:3) object-cover ile merkezden kırpılır; orijinal dosya değişmez */}
+      {/* Hücre oranında (Post ve Reel 3:4) object-cover ile merkezden kırpılır; orijinal dosya değişmez */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}

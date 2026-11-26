@@ -179,3 +179,104 @@ describe("persisted image lifecycle cleanup", () => {
     }
   });
 });
+
+describe("Reel kapak ve video temizliği (R2)", () => {
+  it("state'ten çıkan kapak görseli revoke edilir ve görsel deposundan silinir", async () => {
+    const coverUrl = "blob:https://app.test/cover";
+    const coverRef = makeImageRef("cover-1");
+    const refs = new Map([[coverUrl, coverRef]]);
+    const removeStoredImage = vi.fn(async () => undefined);
+    const revokeObjectUrl = vi.fn();
+    const post = {
+      id: "r", source: "mevcut" as const, imageUrl: "https://cdn.test/poster.jpg", recencyIndex: 0, pinned: false,
+      postType: "reel" as const, coverImageUrl: coverUrl,
+    };
+    await cleanUpRemovedImages({
+      previousState: state({ existingPosts: [post] }),
+      nextState: state({ existingPosts: [{ ...post, coverImageUrl: undefined }] }),
+      refByObjectUrl: refs,
+      trackedObjectUrls: new Set([coverUrl]),
+      revokeObjectUrl,
+      deleteStoredImage: removeStoredImage,
+    });
+    expect(revokeObjectUrl).toHaveBeenCalledWith(coverUrl);
+    expect(removeStoredImage).toHaveBeenCalledWith(coverRef);
+  });
+
+  it("kaldırılan video video deposundan silinir; görsel deposuna dokunulmaz", async () => {
+    const videoUrl = "blob:https://app.test/video";
+    const videoRef = "idb-video:v-1";
+    const refs = new Map([[videoUrl, videoRef]]);
+    const removeStoredImage = vi.fn(async () => undefined);
+    const removeStoredVideo = vi.fn(async () => undefined);
+    const revokeObjectUrl = vi.fn();
+    const post = {
+      id: "r", source: "planlanan" as const, imageUrl: "https://cdn.test/poster.jpg", planOrder: 0,
+      postType: "reel" as const, mediaType: "video" as const, videoUrl,
+    };
+    await cleanUpRemovedImages({
+      previousState: state({ plannedPosts: [post] }),
+      nextState: state({ plannedPosts: [{ ...post, videoUrl: undefined, mediaType: undefined }] }),
+      refByObjectUrl: refs,
+      trackedObjectUrls: new Set([videoUrl]),
+      revokeObjectUrl,
+      deleteStoredImage: removeStoredImage,
+      deleteStoredVideo: removeStoredVideo,
+    });
+    expect(revokeObjectUrl).toHaveBeenCalledWith(videoUrl);
+    expect(removeStoredVideo).toHaveBeenCalledWith(videoRef);
+    expect(removeStoredImage).not.toHaveBeenCalled();
+  });
+
+  it("hâlâ kullanılan video ve kapak silinmez", async () => {
+    const videoUrl = "blob:https://app.test/video";
+    const coverUrl = "blob:https://app.test/cover";
+    const refs = new Map([[videoUrl, "idb-video:v-1"], [coverUrl, makeImageRef("c-1")]]);
+    const removeStoredImage = vi.fn(async () => undefined);
+    const removeStoredVideo = vi.fn(async () => undefined);
+    const revokeObjectUrl = vi.fn();
+    const post = {
+      id: "r", source: "mevcut" as const, imageUrl: coverUrl, recencyIndex: 0, pinned: false,
+      postType: "reel" as const, mediaType: "video" as const, videoUrl, coverImageUrl: coverUrl,
+    };
+    await cleanUpRemovedImages({
+      previousState: state({ existingPosts: [post] }),
+      nextState: state({ existingPosts: [{ ...post, caption: "yeni açıklama" }] }),
+      refByObjectUrl: refs,
+      trackedObjectUrls: new Set([videoUrl, coverUrl]),
+      revokeObjectUrl,
+      deleteStoredImage: removeStoredImage,
+      deleteStoredVideo: removeStoredVideo,
+    });
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    expect(removeStoredImage).not.toHaveBeenCalled();
+    expect(removeStoredVideo).not.toHaveBeenCalled();
+  });
+});
+
+describe("paylaşılan video referansı (R2 denetimi)", () => {
+  it("aynı video başka projedeki kopyada hâlâ kullanılıyorsa silinmez; son kullanıcı bırakınca silinir", async () => {
+    const urlA = "blob:https://app.test/video-a";
+    const urlB = "blob:https://app.test/video-b";
+    const ref = "idb-video:shared-1";
+    const refs = new Map([[urlA, ref], [urlB, ref]]);
+    const removeStoredVideo = vi.fn(async () => undefined);
+    const reelIn = (id: string, videoUrl: string | undefined) => ({
+      id, source: "mevcut" as const, imageUrl: "https://cdn.test/p.jpg", recencyIndex: 0, pinned: false,
+      postType: "reel" as const, mediaType: videoUrl ? ("video" as const) : undefined, videoUrl,
+    });
+    const project = (id: string, videoUrl: string | undefined) => ({
+      id, name: id, month: 1, year: 2026, createdAt: "", updatedAt: "",
+      brand: { id: "brand", name: "Marka", username: "marka" }, existingPosts: [reelIn(`${id}-r`, videoUrl)], plannedPosts: [],
+    });
+    const both = state({ projects: [project("p1", urlA), project("p2", urlB)] });
+    const onlyB = state({ projects: [project("p1", undefined), project("p2", urlB)] });
+    const none = state({ projects: [project("p1", undefined), project("p2", undefined)] });
+
+    await cleanUpRemovedImages({ previousState: both, nextState: onlyB, refByObjectUrl: refs, trackedObjectUrls: new Set([urlA, urlB]), revokeObjectUrl: vi.fn(), deleteStoredVideo: removeStoredVideo });
+    expect(removeStoredVideo).not.toHaveBeenCalled();
+
+    await cleanUpRemovedImages({ previousState: onlyB, nextState: none, refByObjectUrl: refs, trackedObjectUrls: new Set([urlB]), revokeObjectUrl: vi.fn(), deleteStoredVideo: removeStoredVideo });
+    expect(removeStoredVideo).toHaveBeenCalledWith(ref);
+  });
+});

@@ -81,6 +81,8 @@ export default function AuthGate() {
     void fetch(withBasePath("/api/auth/bootstrap"), { cache: "no-store" })
       .then(async (response) => {
         const data: unknown = await response.json().catch(() => null);
+        // 503: sunucu hedef proje koruması/yapılandırması başarısız. Koruma atlanmaz; yalnız nedeni açıklanır.
+        if (response.status === 503) throw new Error("SERVER_CONFIG");
         if (!response.ok || typeof (data as { canBootstrap?: unknown } | null)?.canBootstrap !== "boolean") {
           throw new Error("Bootstrap durumu doğrulanamadı.");
         }
@@ -89,8 +91,13 @@ export default function AuthGate() {
       .then((data) => {
         if (!cancelled) setCanBootstrap(data.canBootstrap);
       })
-      .catch(() => {
-        if (!cancelled) setBootstrapError("Giriş durumu doğrulanamadı. Lütfen tekrar deneyin.");
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setBootstrapError(
+          error instanceof Error && error.message === "SERVER_CONFIG"
+            ? "Sunucu yapılandırması eksik veya hatalı olduğu için giriş durumu doğrulanamıyor. Lütfen sistem yöneticisine başvurun."
+            : "Giriş durumu doğrulanamadı. Lütfen tekrar deneyin.",
+        );
       });
     return () => { cancelled = true; };
   }, [session, bootstrapAttempt]);

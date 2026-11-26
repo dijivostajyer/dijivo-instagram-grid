@@ -10,6 +10,9 @@ import type { PlannedPost } from "@/lib/types";
 // katmanı taklidi edilir.
 vi.mock("@/lib/validators", () => ({
   MAX_VIDEO_BYTES: 100 * 1024 * 1024,
+  getMediaSizeAdvisory: vi.fn(() => null),
+  safeRevokeObjectUrl: vi.fn(),
+  createVideoPoster: vi.fn(async (url: string) => ({ url: `${url}-poster`, width: 1080, height: 1920 })),
   loadImageFile: vi.fn(async (file: File) => {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       throw new Error("Desteklenmeyen dosya türü. Lütfen JPG, PNG veya WebP biçiminde bir görsel yükleyin.");
@@ -167,6 +170,36 @@ describe("PlannedUpload — Reel tek dosya akışı", () => {
     expect(alt).toBe("kapak.png");
     expect(reel.videoUrl).toBe("blob:reel.mp4");
     expect(reel.coverImageUrl).toBe("blob:kapak.png");
+  });
+
+  it("kapaksız reel: grid görseli videodan üretilen ayrı kare olur, kapak tanımsız kalır", async () => {
+    const onUpload = vi.fn();
+    renderReel(onUpload);
+    const videoInput = [...fileInputs()].find((input) => input.accept === "video/mp4,video/webm")!;
+    await act(async () => {
+      fireEvent.change(videoInput, { target: { files: [new File(["x"], "reel.mp4", { type: "video/mp4" })] } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reel ekle" }));
+    });
+    const [url, alt, postType, , reel] = onUpload.mock.calls[0];
+    expect(postType).toBe("reel");
+    expect(url).toBe("blob:reel.mp4-poster");
+    expect(alt).toBe("reel.mp4");
+    expect(reel.videoUrl).toBe("blob:reel.mp4");
+    expect(reel.coverImageUrl).toBeUndefined();
+  });
+
+  it("düz Post yüklemesi video/poster akışını tetiklemez", async () => {
+    const onUpload = vi.fn();
+    render(<PlannedUpload onUpload={onUpload} />);
+    const imageInput = [...fileInputs()].find((input) => input.accept.includes("image/") && input.multiple)!;
+    await act(async () => {
+      fireEvent.change(imageInput, { target: { files: [imageFile("a.png")] } });
+    });
+    await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1));
+    expect(onUpload.mock.calls[0][4]).toBeUndefined();
+    expect(onUpload.mock.calls[0][0]).toBe("blob:a.png");
   });
 
   it("reel metni tek video olduğunu belirtir", () => {

@@ -1,4 +1,5 @@
 import type { CalendarItem } from "./calendar-types";
+import { getSupabaseBrowserClient } from "./supabase-browser";
 import type {
   CalendarItemInput,
   CalendarPatch,
@@ -28,11 +29,22 @@ async function request<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  // Sunucu her çağrıda oturumu doğrular: bearer token olmadan istek gönderilmez.
+  const client = getSupabaseBrowserClient();
+  const { data: sessionData } = (await client?.auth.getSession()) ?? { data: { session: null } };
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    throw new ApiCalendarError("Oturum doğrulanamadı. Lütfen tekrar giriş yapın.", 401);
+  }
   let response: Response;
   try {
     response = await fetch(path, {
-      headers: { "Content-Type": "application/json" },
       ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init.headers as Record<string, string> | undefined),
+        Authorization: `Bearer ${accessToken}`,
+      },
     });
   } catch {
     throw new ApiCalendarError(

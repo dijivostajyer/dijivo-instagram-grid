@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildStoryRows, reconcileWorkspaceState } from "./workspace-store";
 import type { PersistedAppState } from "./storage";
+import { fingerprintState } from "./workspace-sync";
 
 const brand = { id: "brand-a", name: "Brand", username: "brand" };
 const project = {
@@ -50,5 +51,40 @@ describe("buildStoryRows", () => {
     ]);
     expect(rows).toEqual([]);
     warn.mockRestore();
+  });
+});
+
+describe("reconcileWorkspaceState — baseline ile bayat/çevrimdışı birleştirme", () => {
+  const post = (id: string, caption: string) => ({ id, source: "mevcut" as const, imageUrl: `storage:workspace-media/u/${id}.jpg`, recencyIndex: 0, pinned: false, caption });
+  const stateOf = (posts: ReturnType<typeof post>[]): PersistedAppState => ({
+    version: 3, brands: [brand], activeBrandId: brand.id, activeProjectId: project.id, brand, existingPosts: posts, plannedPosts: [],
+    projects: [{ ...project, existingPosts: posts, plannedPosts: [] }],
+  });
+  const identity = (url: string) => url;
+  const baselineOf = (posts: ReturnType<typeof post>[]) => fingerprintState(stateOf(posts), identity);
+
+  it("yalnız yerel değiştiyse yerel düzenleme korunur", () => {
+    const synced = [post("a", "ilk")];
+    const merged = reconcileWorkspaceState(stateOf(synced), stateOf([post("a", "yerel\n\nsatır")]), { baseline: baselineOf(synced), canonical: identity });
+    expect(merged.projects?.[0].existingPosts[0].caption).toBe("yerel\n\nsatır");
+  });
+
+  it("bulut da değiştiyse (çakışma) bulut kazanır", () => {
+    const synced = [post("a", "ilk")];
+    const merged = reconcileWorkspaceState(stateOf([post("a", "bulut")]), stateOf([post("a", "yerel")]), { baseline: baselineOf(synced), canonical: identity });
+    expect(merged.projects?.[0].existingPosts[0].caption).toBe("bulut");
+  });
+
+  it("buluttan silinmiş ve yerelde değişmemiş gönderi düşer; yerelde değişmişse korunur", () => {
+    const synced = [post("a", "ilk"), post("b", "ilk")];
+    const dropped = reconcileWorkspaceState(stateOf([post("b", "ilk")]), stateOf(synced), { baseline: baselineOf(synced), canonical: identity });
+    expect(dropped.projects?.[0].existingPosts.map((item) => item.id)).toEqual(["b"]);
+    const kept = reconcileWorkspaceState(stateOf([post("b", "ilk")]), stateOf([post("a", "yerelde değişti"), post("b", "ilk")]), { baseline: baselineOf(synced), canonical: identity });
+    expect(kept.projects?.[0].existingPosts.map((item) => item.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("baseline yoksa eski davranış: bulut kazanır, yerelde yeni olanlar korunur", () => {
+    const merged = reconcileWorkspaceState(stateOf([post("a", "bulut")]), stateOf([post("a", "yerel"), post("n", "yeni")]));
+    expect(merged.projects?.[0].existingPosts.map((item) => [item.id, item.caption])).toEqual([["a", "bulut"], ["n", "yeni"]]);
   });
 });

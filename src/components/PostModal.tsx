@@ -1,5 +1,7 @@
 "use client";
 
+import CaptionText from "./CaptionText";
+import ReelVideoWithCover from "./ReelVideoWithCover";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   BookmarkIcon,
@@ -19,9 +21,10 @@ import {
   type NewBrandInput,
 } from "@/hooks/use-persisted-grid";
 import { useInstagramPreviewTheme } from "@/lib/ig-preview-theme";
-import { isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
+import { getReelCoverUrl, isInstagramPostUrl, isPlayableVideoUrl } from "@/lib/reel-media";
 import {
   MAX_VIDEO_BYTES,
+  getMediaSizeAdvisory,
   loadCoverFile,
   loadImageFile,
   loadVideoFile,
@@ -59,6 +62,8 @@ export default function PostModal({
   onChangeImage,
   onChangeVideo,
   onChangeCover,
+  onRemoveVideo,
+  onRemoveCover,
   onCopy,
   onClose,
 }: {
@@ -80,6 +85,10 @@ export default function PostModal({
   onChangeVideo?: (url: string) => Promise<void>;
   /** §7: Reel kapak görseli değiştir. */
   onChangeCover?: (url: string) => Promise<void>;
+  /** R2: videoyu kaldırır (gönderi görselli Reel olarak kalır). */
+  onRemoveVideo?: () => Promise<void>;
+  /** R2: kapağı kaldırır; grid görseli videonun ilk karesinden üretilir. */
+  onRemoveCover?: () => Promise<void>;
   onCopy: (targetProjectId: string, options: PostCopyOptions) => string | null;
   onClose: () => void;
 }) {
@@ -106,6 +115,8 @@ export default function PostModal({
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [videoBusy, setVideoBusy] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [mediaNotice, setMediaNotice] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<"video" | "cover" | null>(null);
 
   // §7/§11: modal kapanınca video playback durur, timeline sıfırlanır.
   function stopVideo() {
@@ -131,10 +142,13 @@ export default function PostModal({
   async function handleVideoChange(files: FileList | null) {
     if (!files?.length) return;
     setMediaError(null);
+    setMediaNotice(null);
     setVideoBusy(true);
     try {
-      const { url } = await loadVideoFile(files[0]);
+      const { url, width, height } = await loadVideoFile(files[0]);
       await onChangeVideo?.(url);
+      const advisory = getMediaSizeAdvisory(width, height, "reel");
+      if (advisory) setMediaNotice(`Boyut önerisi (video yüklendi, dosya değiştirilmedi): ${advisory}`);
     } catch (e) {
       setMediaError(e instanceof Error ? e.message : "Video değiştirilemedi.");
     } finally {
@@ -143,13 +157,35 @@ export default function PostModal({
     }
   }
 
+  async function handleRemove(kind: "video" | "cover") {
+    if (confirmRemove !== kind) {
+      setConfirmRemove(kind);
+      return;
+    }
+    setConfirmRemove(null);
+    setMediaError(null);
+    setMediaNotice(null);
+    setVideoBusy(true);
+    try {
+      if (kind === "video") await onRemoveVideo?.();
+      else await onRemoveCover?.();
+    } catch (e) {
+      setMediaError(e instanceof Error ? e.message : kind === "video" ? "Video kaldırılamadı." : "Kapak kaldırılamadı.");
+    } finally {
+      setVideoBusy(false);
+    }
+  }
+
   async function handleCoverChange(files: FileList | null) {
     if (!files?.length) return;
     setMediaError(null);
+    setMediaNotice(null);
     setVideoBusy(true);
     try {
-      const { url } = await loadCoverFile(files[0]);
+      const { url, width, height } = await loadCoverFile(files[0]);
       await onChangeCover?.(url);
+      const advisory = getMediaSizeAdvisory(width, height, "reel");
+      if (advisory) setMediaNotice(`Kapak boyut önerisi (dosya değiştirilmedi): ${advisory}`);
     } catch (e) {
       setMediaError(e instanceof Error ? e.message : "Kapak değiştirilemedi.");
     } finally {
@@ -238,7 +274,6 @@ export default function PostModal({
   const darkMuted = dark ? "text-neutral-400" : "text-neutral-500";
   const darkBorder = dark ? "border-neutral-800" : "border-slate-200";
 
-  const captionParts = caption.split(/(#[\p{L}\d_]+)/gu);
 
   const brandForProject = (project: GridProject) =>
     brands.find((item) => item.id === project.brandId)?.name ??
@@ -300,27 +335,21 @@ export default function PostModal({
           </div>
 
           {isReel && post.videoUrl ? (
-            <div className="relative aspect-square w-full bg-black">
-              {/* §7: autoplay YOK — controls + playsInline; kullanıcı başlatır. */}
-              <video
-                key={post.videoUrl}
-                ref={videoRef}
-                src={post.videoUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="absolute inset-0 size-full object-contain"
-                aria-label="Reel video önizlemesi"
-                onError={() => setVideoFailed(true)}
-              />
-            </div>
+            <ReelVideoWithCover
+              videoUrl={post.videoUrl}
+              coverUrl={getReelCoverUrl(post)}
+              title={title}
+              videoRef={videoRef}
+              videoAriaLabel="Reel video önizlemesi"
+              onVideoError={() => setVideoFailed(true)}
+            />
           ) : (
-            <div className="relative aspect-square w-full bg-neutral-100">
+            <div className="relative flex w-full items-center justify-center bg-neutral-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={post.imageUrl}
                 alt={title}
-                className="absolute inset-0 size-full object-cover"
+                className="block h-auto max-h-[80vh] w-full object-contain"
               />
               {post.postType === "reel" ? (
                 <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/60 px-3 py-2 text-xs font-medium text-white">
@@ -342,20 +371,9 @@ export default function PostModal({
             <span className="flex-1" />
             <BookmarkIcon className="size-6" aria-hidden="true" />
           </div>
-          <p className="px-4 pt-2 pb-4 text-sm leading-relaxed">
+          <p className="whitespace-pre-wrap break-words px-4 pt-2 pb-4 text-sm leading-relaxed">
             <span className="font-semibold">{brand.username}</span>{" "}
-            {captionParts.map((part, index) =>
-              part.startsWith("#") ? (
-                <span
-                  key={index}
-                  className="text-sky-700 dark:text-sky-400"
-                >
-                  {part}{" "}
-                </span>
-              ) : (
-                <span key={index}>{part}</span>
-              ),
-            )}
+            <CaptionText caption={caption} />
           </p>
         </div>
 
@@ -414,6 +432,26 @@ export default function PostModal({
                       >
                         Kapak değiştir
                       </button>
+                      {onRemoveCover && getReelCoverUrl(post) ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleRemove("cover")}
+                          disabled={videoBusy}
+                          className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                        >
+                          {confirmRemove === "cover" ? "Kaldırmak için tekrar tıklayın" : "Kapağı kaldır"}
+                        </button>
+                      ) : null}
+                      {onRemoveVideo && post.imageUrl !== post.videoUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleRemove("video")}
+                          disabled={videoBusy}
+                          className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                        >
+                          {confirmRemove === "video" ? "Kaldırmak için tekrar tıklayın" : "Videoyu kaldır"}
+                        </button>
+                      ) : null}
                       <span className="text-xs text-neutral-500">{REEL_HINT}</span>
                       <input
                         ref={videoInputRef}
@@ -455,6 +493,11 @@ export default function PostModal({
                       />
                     </>
                   )}
+                  {mediaNotice ? (
+                    <p role="status" className="mt-1 text-xs text-amber-700">
+                      {mediaNotice}
+                    </p>
+                  ) : null}
                   {mediaError ? (
                     <p role="alert" className="mt-1 text-xs font-medium text-red-600">
                       {mediaError}

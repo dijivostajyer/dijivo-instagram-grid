@@ -11,6 +11,9 @@ import type { ExistingPost } from "@/lib/types";
 // iş akışını değiştirmez).
 vi.mock("@/lib/validators", () => ({
   MAX_VIDEO_BYTES: 100 * 1024 * 1024,
+  getMediaSizeAdvisory: vi.fn(() => null),
+  safeRevokeObjectUrl: vi.fn(),
+  createVideoPoster: vi.fn(async (url: string) => ({ url: `${url}-poster`, width: 1080, height: 1920 })),
   loadImageFile: vi.fn(async (file: File) => {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       throw new Error("Desteklenmeyen dosya türü. Lütfen JPG, PNG veya WebP biçiminde bir görsel yükleyin.");
@@ -142,6 +145,23 @@ describe("ExistingPostList — Reel tek dosya akışı", () => {
     renderReel(vi.fn());
     const addButton = screen.getByRole("button", { name: "Reel ekle" });
     expect((addButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("kapaksız reel: grid görseli videodan üretilen ayrı kare olur, kapak tanımsız kalır", async () => {
+    const onUpload = vi.fn();
+    renderReel(onUpload);
+    const videoInput = [...fileInputs()].find((input) => input.accept === "video/mp4,video/webm")!;
+    await act(async () => {
+      fireEvent.change(videoInput, { target: { files: [new File(["x"], "reel.mp4", { type: "video/mp4" })] } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reel ekle" }));
+    });
+    const input = onUpload.mock.calls[0][0];
+    expect(input.postType).toBe("reel");
+    expect(input.url).toBe("blob:reel.mp4-poster");
+    expect(input.videoUrl).toBe("blob:reel.mp4");
+    expect(input.coverImageUrl).toBeUndefined();
   });
 
   it("1 kapak + 1 video ile reel oluşturulur (cover + videoUrl)", async () => {

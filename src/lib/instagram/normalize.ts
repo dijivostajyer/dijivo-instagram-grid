@@ -104,7 +104,7 @@ export function normalizeInstagramProfile(profile: import("./types").InstagramPr
       const videoUrl = optionalHttpUrl(post.videoUrl);
       const permalinkUrl = optionalHttpUrl(post.permalinkUrl);
       if (!post.id || !thumbnailUrl) return [];
-      return [{ id: String(post.id), type: post.type, thumbnailUrl, videoUrl, permalinkUrl, caption: optionalText(post.caption), postedAt: optionalText(post.postedAt) }];
+      return [{ id: String(post.id), type: post.type, thumbnailUrl, videoUrl, permalinkUrl, caption: typeof post.caption === "string" && post.caption.trim() ? post.caption : undefined, postedAt: optionalText(post.postedAt) }];
     }),
     highlights: (profile.highlights ?? []).flatMap((highlight) => {
       if (!highlight.id || !optionalText(highlight.title)) return [];

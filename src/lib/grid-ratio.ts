@@ -3,15 +3,17 @@ import type { ExistingPost, PlannedPost, PostType } from "./types";
 /**
  * Grid hücre oranı ve hücre medyası tek kaynaktan gelir: editör, paylaşım
  * ekranı, mini önizleme ve PDF/JPG export aynı kararı kullanır.
- * Post 3:4, Reel 2:3 (Post'tan daha dikey).
+ * Post ve Reel aynı 3:4 hücrede gösterilir. Bu yalnızca GRID gösterimidir;
+ * Reel'in gerçek 9:16 medyası ve orijinal dosyalar değişmez (detay
+ * ekranları gerçek oranı kullanır).
  * Tailwind sınıfları tam metin olarak burada durmalı (JIT taraması).
  */
 export const POST_CELL_ASPECT_CLASS = "aspect-[3/4]";
-export const REEL_CELL_ASPECT_CLASS = "aspect-[2/3]";
+export const REEL_CELL_ASPECT_CLASS = "aspect-[3/4]";
 
-/** Yükseklik / genişlik: Post 3:4 → 4/3, Reel 2:3 → 3/2. */
+/** Yükseklik / genişlik: Post ve Reel 3:4 → 4/3. */
 export const POST_CELL_HEIGHT_RATIO = 4 / 3;
-export const REEL_CELL_HEIGHT_RATIO = 3 / 2;
+export const REEL_CELL_HEIGHT_RATIO = 4 / 3;
 /** Gridde görülebilecek en uzun hücre (sayfa yerleşimi için üst sınır). */
 export const MAX_CELL_HEIGHT_RATIO = REEL_CELL_HEIGHT_RATIO;
 

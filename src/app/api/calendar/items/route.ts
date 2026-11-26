@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { CalendarAccessError } from "@/lib/calendar-store";
+import { assertCalendarScope, assertPostInBrand, authenticateCalendarRequest } from "@/lib/calendar-authz";
 import { validateCalendarInput } from "@/lib/calendar-utils";
 import { getCalendarStore } from "../_store";
 
@@ -14,6 +15,8 @@ function notConfigured(): NextResponse {
 export async function GET(request: Request): Promise<NextResponse> {
   const store = getCalendarStore();
   if (!store) return notConfigured();
+  const auth = await authenticateCalendarRequest(request);
+  if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
   const brandId = searchParams.get("brandId") ?? "";
   const projectId = searchParams.get("projectId") ?? "";
@@ -23,6 +26,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 400 },
     );
   }
+  const denied = await assertCalendarScope(auth.userId, { brandId, projectId });
+  if (denied) return denied;
   try {
     const items = await store.list(brandId, projectId);
     return NextResponse.json({ items });
@@ -38,12 +43,20 @@ export async function GET(request: Request): Promise<NextResponse> {
 export async function POST(request: Request): Promise<NextResponse> {
   const store = getCalendarStore();
   if (!store) return notConfigured();
+  const auth = await authenticateCalendarRequest(request);
+  if (!auth.ok) return auth.response;
   try {
-    const parsed: unknown = await request.json();
+    // Geçersiz JSON gövdesi 500 değil kontrollü 400 döner.
+    const parsed: unknown = await request.json().catch(() => null);
     if (typeof parsed !== "object" || parsed === null) {
       return NextResponse.json({ error: "Geçersiz istek." }, { status: 400 });
     }
     const input = parsed as Record<string, unknown>;
+    // postId yalnız dize ya da null/eksik olabilir; diğer türler (sayı, nesne, dizi…) String(...) ile
+    // sessizce dönüştürülmeden reddedilir (PATCH ile tutarlı).
+    if (input.postId !== undefined && input.postId !== null && typeof input.postId !== "string") {
+      return NextResponse.json({ error: "Geçersiz gönderi bağlantısı." }, { status: 400 });
+    }
     // §38: sunucu tarafında tekrar doğrulanır.
     const error = validateCalendarInput({
       brandId: String(input.brandId ?? ""),
@@ -58,6 +71,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
+    }
+    // Marka ve plan oturumdaki kullanıcıya ait ve birbiriyle tutarlı olmalı.
+    const denied = await assertCalendarScope(auth.userId, {
+      brandId: String(input.brandId),
+      projectId: String(input.projectId),
+    });
+    if (denied) return denied;
+    // Bağlanacak gönderi (varsa) bu markaya ve kullanıcıya ait olmalı; yazmadan ÖNCE doğrulanır.
+    const postId = input.postId === undefined || input.postId === null ? "" : String(input.postId);
+    if (postId.trim() !== "") {
+      const postDenied = await assertPostInBrand(auth.userId, String(input.brandId), postId);
+      if (postDenied) return postDenied;
     }
     const item = await store.create({
       brandId: String(input.brandId),

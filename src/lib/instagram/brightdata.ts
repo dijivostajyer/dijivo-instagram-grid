@@ -44,6 +44,11 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/** Caption yazıldığı gibi korunur (satır sonları/boş satırlar dahil); yalnız tamamen boşsa düşer. */
+function captionText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 function bool(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
@@ -101,7 +106,7 @@ function normalizePosts(value: unknown): InstagramPost[] {
       thumbnailUrl,
       videoUrl,
       permalinkUrl: isInstagramPostUrl(permalinkUrl) ? permalinkUrl : undefined,
-      caption: text(item.caption ?? item.description),
+      caption: captionText(item.caption ?? item.description),
       postedAt: text(item.datetime ?? item.timestamp ?? item.taken_at),
     }];
   });

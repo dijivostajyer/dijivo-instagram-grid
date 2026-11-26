@@ -8,6 +8,8 @@ import type { GridProject, PersistedAppState } from "./storage";
 import type { Brand, ExistingPost, PlannedPost, Story } from "./types";
 import { isWorkspaceMediaRef, uploadWorkspaceMedia, workspaceMediaPath, workspaceMediaRefFromSignedUrl } from "./workspace-media-store";
 import { isInstagramPostUrl } from "./reel-media";
+import { isProjectMonthConflict } from "./project-ops";
+import { brandFingerprint, postFingerprint, type MediaMapper, type PushScope, type SyncFingerprints } from "./workspace-sync";
 
 type BrandRow = Record<string, unknown>;
 type PostRow = Record<string, unknown>;
@@ -104,27 +106,65 @@ function mergeBrand(remote: Brand, local: Brand): Brand {
   };
 }
 
-function mergePosts<T extends ExistingPost | PlannedPost>(remote: T[], local: T[]): T[] {
-  const ids = new Set(remote.map((post) => post.id));
-  return [...remote, ...local.filter((post) => !ids.has(post.id))];
+/** Baseline'a göre karar vermek için: önceki eşitlemedeki parmak izleri + yerel medya eşlemesi. */
+export interface ReconcileContext {
+  baseline: SyncFingerprints | null;
+  canonical: MediaMapper;
+}
+
+/**
+ * Aynı gönderi iki tarafta da varsa: yalnız YEREL taraf baseline'dan değiştiyse ve
+ * bulut değişmediyse yerel düzenleme korunur (kaydedilememiş çevrimdışı düzenleme
+ * kaybolmaz); aksi halde bulut kazanır. Yalnız yerelde olan gönderi, baseline'da
+ * varsa ve yerelde değişmediyse başka cihazda silinmiştir → düşer; yerelde yeni
+ * veya değişmişse korunur.
+ */
+function mergePosts<T extends ExistingPost | PlannedPost>(remote: T[], local: T[], projectId: string, context?: ReconcileContext): T[] {
+  const baseline = context?.baseline?.posts;
+  const fingerprint = (post: T) => postFingerprint(post, projectId, context!.canonical);
+  const localById = new Map(local.map((post) => [post.id, post]));
+  const remoteIds = new Set(remote.map((post) => post.id));
+  const merged = remote.map((post) => {
+    const localPost = localById.get(post.id);
+    const base = baseline?.[post.id];
+    if (!context || !localPost || base === undefined) return post;
+    return fingerprint(localPost) !== base && fingerprint(post) === base ? localPost : post;
+  });
+  const localOnly = local.filter((post) => {
+    if (remoteIds.has(post.id)) return false;
+    const base = baseline?.[post.id];
+    return !(context && base !== undefined && fingerprint(post) === base);
+  });
+  return [...merged, ...localOnly];
+}
+
+function mergeBrandWithBaseline(remote: Brand, local: Brand, context?: ReconcileContext): Brand {
+  const base = context?.baseline?.brands[remote.id];
+  if (context && base !== undefined && brandFingerprint(local, context.canonical) !== base && brandFingerprint(remote, context.canonical) === base) {
+    // Yalnız yerel değişti: yerel alanlar önceliklidir (öne çıkanlar kimliğe göre birleşir).
+    return mergeBrand(local, remote);
+  }
+  return mergeBrand(remote, local);
 }
 
 /**
  * Entity-level, non-destructive initial reconciliation. Remote records win
- * when the same ID exists; local records missing remotely are retained so a
+ * when the same ID exists (unless only the local copy changed since the last
+ * sync, see `mergePosts`); local records missing remotely are retained so a
  * partially migrated workspace (brands/projects present, posts absent) heals
  * itself on the next sync.
  */
 export function reconcileWorkspaceState(
   remote: PersistedAppState | null,
   local: PersistedAppState,
+  context?: ReconcileContext,
 ): PersistedAppState {
   if (!remote) return local;
   const localBrands = new Map((local.brands ?? []).map((brand) => [brand.id, brand]));
   const brands = (remote.brands ?? []).map((brand) => {
     const localBrand = localBrands.get(brand.id);
     if (localBrand) localBrands.delete(brand.id);
-    return localBrand ? mergeBrand(brand, localBrand) : brand;
+    return localBrand ? mergeBrandWithBaseline(brand, localBrand, context) : brand;
   });
   brands.push(...localBrands.values());
 
@@ -137,8 +177,8 @@ export function reconcileWorkspaceState(
     return {
       ...project,
       brand,
-      existingPosts: mergePosts(project.existingPosts, localProject.existingPosts),
-      plannedPosts: mergePosts(project.plannedPosts, localProject.plannedPosts),
+      existingPosts: mergePosts(project.existingPosts, localProject.existingPosts, project.id, context),
+      plannedPosts: mergePosts(project.plannedPosts, localProject.plannedPosts, project.id, context),
     };
   });
   projects.push(...localProjects.values());
@@ -228,19 +268,40 @@ export function buildStoryRows(userId: string, projects: readonly GridProject[])
   });
 }
 
+/**
+ * workspace_projects (user_id, brand_id, month, year) benzersizlik kuralı ihlal edildi:
+ * aynı marka için aynı ay planı başka bir kayıtla zaten var. Ağ/yetki hatalarından ayırt edilir.
+ */
+export class ProjectMonthConflictError extends Error {
+  constructor() {
+    super("Aynı marka için aynı ay planı zaten mevcut.");
+    this.name = "ProjectMonthConflictError";
+  }
+}
+
 export async function pushWorkspace(
   user: User,
   input: PersistedAppState,
   uploadCache: WorkspaceMediaUploadCache = new Map(),
+  /** Kullanıcının silip önceki eşitlemede buluta yazılmış kayıtlar (yalnız bu kullanıcının satırları). */
+  removed: { postIds: string[]; highlightIds: string[] } = { postIds: [], highlightIds: [] },
+  /**
+   * Verilirse yalnız bu kümelerdeki varlıklar yazılır (baseline'dan değişenler).
+   * Verilmezse hepsi yazılır (ilk taşıma). Bayat bir cihazın başkasının
+   * kayıtlarını ezmesini/diriltmesini önler.
+   */
+  only?: PushScope,
 ): Promise<PersistedAppState> {
   const db = getSupabaseBrowserClient(); if (!db) throw new Error("Supabase Auth yapılandırılmadı.");
   const state = await materializeMedia(input, user, uploadCache);
   const brands = state.brands ?? [];
-  const brandRows = brands.map((brand) => ({ user_id: user.id, id: brand.id, name: brand.name, username: brand.username, display_name: brand.displayName ?? null, profile_image_path: stored(brand.profileImageUrl), bio: brand.bio ?? null, website: brand.website ?? null, phone: brand.phone ?? null, email: brand.email ?? null, category: brand.category ?? null, post_count: brand.postCount ?? null, followers_count: brand.followersCount ?? null, following_count: brand.followingCount ?? null, hashtag_groups: brand.hashtagGroups ?? [], default_mentions: brand.defaultMentions ?? [], default_ctas: brand.defaultCtas ?? [] }));
+  const inScope = (ids: ReadonlySet<string> | undefined, id: string) => !only || Boolean(ids?.has(id));
+  const brandRows = brands.filter((brand) => inScope(only?.brandIds, brand.id)).map((brand) => ({ user_id: user.id, id: brand.id, name: brand.name, username: brand.username, display_name: brand.displayName ?? null, profile_image_path: stored(brand.profileImageUrl), bio: brand.bio ?? null, website: brand.website ?? null, phone: brand.phone ?? null, email: brand.email ?? null, category: brand.category ?? null, post_count: brand.postCount ?? null, followers_count: brand.followersCount ?? null, following_count: brand.followingCount ?? null, hashtag_groups: brand.hashtagGroups ?? [], default_mentions: brand.defaultMentions ?? [], default_ctas: brand.defaultCtas ?? [] }));
   if (brandRows.length) { const { error } = await db.from("workspace_brands").upsert(brandRows, { onConflict: "id" }); if (error) throw new Error(`workspace_brands yazılamadı: ${error.message}`); }
   const projects = state.projects ?? [];
-  if (projects.length) { const { error } = await db.from("workspace_projects").upsert(projects.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) throw new Error(`workspace_projects yazılamadı: ${error.message}`); }
-  const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl), external_url: post.externalUrl ?? null, grid_order: post.gridOrder ?? null })));
+  const projectRows = projects.filter((project) => inScope(only?.projectIds, project.id));
+  if (projectRows.length) { const { error } = await db.from("workspace_projects").upsert(projectRows.map((p) => ({ user_id: user.id, id: p.id, brand_id: p.brandId ?? p.brand.id, name: p.name, month: p.month, year: p.year, created_at: p.createdAt, updated_at: p.updatedAt })), { onConflict: "id" }); if (error) { if (isProjectMonthConflict(error)) throw new ProjectMonthConflictError(); throw new Error(`workspace_projects yazılamadı: ${error.message}`); } }
+  const postRows = projects.flatMap((project) => [...project.existingPosts, ...project.plannedPosts].filter((post) => inScope(only?.postIds, post.id)).map((post) => ({ user_id: user.id, id: post.id, brand_id: project.brandId ?? project.brand.id, project_id: project.id, source: post.source, image_path: stored(post.imageUrl), alt: post.alt ?? null, aspect_ratio: post.aspectRatio ?? null, post_type: post.postType ?? null, caption: post.caption ?? null, recency_index: post.source === "mevcut" ? post.recencyIndex : null, plan_order: post.source === "planlanan" ? post.planOrder : null, pinned: post.source === "mevcut" ? post.pinned : false, pinned_order: post.source === "mevcut" ? post.pinnedOrder ?? null : null, media_type: post.mediaType ?? null, video_path: stored(post.videoUrl), cover_path: stored(post.coverImageUrl), external_url: post.externalUrl ?? null, grid_order: post.gridOrder ?? null })));
   if (postRows.length) {
     const { data, error } = await upsertPostRows(db, postRows);
     if (error) throw new Error(`workspace_posts yazılamadı: ${error.message}`);
@@ -252,10 +313,14 @@ export async function pushWorkspace(
       projectIds: [...new Set(data.map((row) => String(row.project_id)))],
     });
   }
-  const highlights = brands.flatMap((brand) => (brand.highlights ?? []).map((highlight) => ({ user_id: user.id, id: highlight.id, brand_id: brand.id, title: highlight.title, image_path: stored(highlight.imageUrl) })));
+  const highlights = brands.flatMap((brand) => (brand.highlights ?? []).filter((highlight) => inScope(only?.highlightIds, highlight.id)).map((highlight) => ({ user_id: user.id, id: highlight.id, brand_id: brand.id, title: highlight.title, image_path: stored(highlight.imageUrl) })));
   if (highlights.length) { const { error } = await db.from("workspace_highlights").upsert(highlights, { onConflict: "id" }); if (error) throw new Error(`workspace_highlights yazılamadı: ${error.message}`); }
-  const stories = buildStoryRows(user.id, projects);
+  const stories = buildStoryRows(user.id, projects).filter((row) => inScope(only?.storyIds, String(row.id)));
   if (stories.length) { const { error } = await db.from("workspace_stories").upsert(stories, { onConflict: "id" }); if (error) throw new Error(`workspace_stories yazılamadı: ${error.message}`); }
+  // Silmeler yukarıdaki yazımlardan sonra uygulanır; böylece yazım başarısız olursa
+  // hiçbir şey silinmez. Yalnız önceden eşitlenmiş kimlikler gelir (bkz. computeRemovedIds).
+  if (removed.postIds.length) { const { error } = await db.from("workspace_posts").delete().eq("user_id", user.id).in("id", removed.postIds); if (error) throw new Error(`workspace_posts silinemedi: ${error.message}`); }
+  if (removed.highlightIds.length) { const { error } = await db.from("workspace_highlights").delete().eq("user_id", user.id).in("id", removed.highlightIds); if (error) throw new Error(`workspace_highlights silinemedi: ${error.message}`); }
   const { error } = await db.from("workspace_prefs").upsert({ user_id: user.id, active_brand_id: state.activeBrandId || null, active_project_id: state.activeProjectId || null }); if (error) throw new Error(`workspace_prefs yazılamadı: ${error.message}`);
   return syncActiveProject(state);
 }

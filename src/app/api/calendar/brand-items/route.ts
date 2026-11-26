@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { assertCalendarScope, authenticateCalendarRequest } from "@/lib/calendar-authz";
 import { getCalendarStore } from "../_store";
 
 /**
@@ -15,6 +16,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
+  const auth = await authenticateCalendarRequest(request);
+  if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
   const brandId = searchParams.get("brandId") ?? "";
   if (!brandId.trim()) {
@@ -23,6 +26,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 400 },
     );
   }
+  const denied = await assertCalendarScope(auth.userId, { brandId });
+  if (denied) return denied;
   try {
     const items = await store.listAll(brandId);
     return NextResponse.json({ items });

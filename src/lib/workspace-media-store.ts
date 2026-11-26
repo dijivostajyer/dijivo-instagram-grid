@@ -77,6 +77,20 @@ export async function duplicateWorkspaceMedia(value: string, purpose: string): P
   return uploadFromUrl(source, purpose);
 }
 
+/**
+ * Zaten bayt olarak çözülmüş medyayı (ör. paylaşım hazırlığında IndexedDB'den
+ * okunan) kullanıcının Storage'ına yükler. Oturum yoksa `null`.
+ */
+export async function uploadWorkspaceMediaBytes(bytes: Uint8Array, mime: string, purpose: string): Promise<string | null> {
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new Error("Medya 100 MB sınırını aşıyor.");
+  const db = getSupabaseBrowserClient();
+  if (!db) return null;
+  const { data: userData } = await db.auth.getUser();
+  const user = userData.user;
+  if (!user) return null;
+  return uploadBlob(db, user.id, new Blob([bytes as BlobPart], { type: mime }), mime, purpose);
+}
+
 async function uploadFromUrl(value: string, purpose: string): Promise<string> {
   const blobResponse = await fetch(value);
   if (!blobResponse.ok) throw new Error(`Yerel medya okunamadı (HTTP ${blobResponse.status}).`);
@@ -90,8 +104,18 @@ async function uploadFromUrl(value: string, purpose: string): Promise<string> {
   const { data: userData } = await db.auth.getUser();
   const user = userData.user;
   if (!user) throw new Error("Medya yüklemek için giriş yapın.");
+  return uploadBlob(db, user.id, blob, mime, purpose);
+}
+
+async function uploadBlob(
+  db: NonNullable<ReturnType<typeof getSupabaseBrowserClient>>,
+  userId: string,
+  blob: Blob,
+  mime: string,
+  purpose: string,
+): Promise<string> {
   const extension = mime === "image/jpeg" ? "jpg" : mime.split("/")[1] || "bin";
-  const path = `${user.id}/${purpose}/${crypto.randomUUID()}.${extension}`;
+  const path = `${userId}/${purpose}/${crypto.randomUUID()}.${extension}`;
   const { data: ticket, error: ticketError } = await db.storage.from("workspace-media").createSignedUploadUrl(path, { upsert: false });
   if (ticketError || !ticket) throw new Error(`Medya yükleme bağlantısı oluşturulamadı: ${ticketError?.message ?? "bilinmeyen hata"}`);
   const { error } = await db.storage.from("workspace-media").uploadToSignedUrl(path, ticket.token, blob, { contentType: mime, upsert: false });

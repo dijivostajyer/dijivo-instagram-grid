@@ -112,3 +112,20 @@ describe("AuthGate ilk hesap akışı", () => {
     expect(await screen.findByText("Workspace hazır")).toBeTruthy();
   });
 });
+
+describe("AuthGate: sunucu hedef proje koruması (503)", () => {
+  it("503 alınırsa belirsiz hata yerine yapılandırma mesajı gösterir ve giriş formunu AÇMAZ", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ canBootstrap: false }), { status: 503 })));
+    render(<AuthGate />);
+    await screen.findByText(/Sunucu yapılandırması eksik veya hatalı/);
+    expect(screen.queryByLabelText("E-posta")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Giriş yap" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "İlk Hesabı Oluştur" })).toBeNull();
+  });
+
+  it("503 dışındaki hatalarda genel mesaj korunur", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ canBootstrap: false }), { status: 500 })));
+    render(<AuthGate />);
+    await screen.findByText("Giriş durumu doğrulanamadı. Lütfen tekrar deneyin.");
+  });
+});

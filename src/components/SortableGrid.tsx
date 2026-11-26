@@ -48,7 +48,7 @@ function SortableGridCell({
           setNodeRef(node);
           setActivatorNodeRef(node);
         },
-        // Yalnız öteleme: rectSortingStrategy'nin ölçeği Post 3:4 / Reel 2:3
+        // Yalnız öteleme: rectSortingStrategy'nin ölçeği Post ve Reel 3:4
         // oranını bozardı.
         style: { transform: CSS.Translate.toString(transform), transition },
         attributes,

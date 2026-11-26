@@ -1,28 +1,77 @@
--- Yedekleme + Geri Yükleme Merkezi (Faz 6).
+-- Yedekleme + Geri Yükleme Merkezi (Faz 6) — v4.
 --
--- Yedek paketleri (ZIP) Supabase'de DEĞİL, sunucu dosya sisteminde
--- (BACKUP_DIR; public_html dışında) tutulur. Bu migration yalnız
--- yönetim meta verisini, kilidi ve atomik geri yükleme fonksiyonlarını
--- oluşturur:
+-- YEDEK KAPSAMI (SQL tarafı)
+--   Dışa aktarılır VE geri yüklenir (10 tablo):
+--     workspace_brands, workspace_projects, workspace_posts, workspace_highlights,
+--     workspace_stories, workspace_prefs, calendar_items, share_snapshots,
+--     share_feedback, share_feedback_workflow_events
+--   Dışa aktarılır AMA geri YÜKLENMEZ (restore dokunmaz):
+--     instagram_import_jobs (geçici; snapshot_id içerir), workspace_bootstrap (sahiplik kilidi)
+--   KAPSAM DIŞI: auth.users/parolalar, Vault, Storage nesneleri ve storage.objects meta verisi
+--     (medya uygulama motoru tarafından ayrıca, DB snapshot'ından FARKLI anda paketlenir),
+--     RLS/policy/şema, backup_* tabloları, pg_cron/uzantılar.
 --
---   backup_settings          tekil satır: otomatik yedek ayarı, saklama
---                            politikası ve sunucu tarafı iş kilidi
---   backup_jobs              yedek/geri yükleme işleri (durum, boyut, hata)
---   backup_audit_events      ekleme-yalnız denetim kaydı (kim/ne/ne zaman)
---   backup_restore_staging   geri yükleme satırlarının geçici alanı
---   workspace_sync_state     geri yükleme "epoch"u: eski sekme/cihazların
---                            bayat yerel kopyayı buluta geri yazmasını önler
+-- Yedek paketleri (ZIP) Supabase'de DEĞİL, sunucu dosya sisteminde tutulur.
+-- backup_* tablolarına yalnız service_role erişir (RLS açık, policy yok), en az ayrıcalıkla:
+--   backup_settings: SELECT, INSERT, UPDATE | backup_jobs: SELECT, INSERT, UPDATE, DELETE
+--   backup_audit_events: INSERT | backup_restore_staging: INSERT, DELETE + SELECT(job_id)
+--   workspace_sync_state: service_role'e tablo yetkisi YOK; authenticated yalnız
+--   id, restore_epoch, restored_at kolonlarında SELECT.
+-- SECURITY DEFINER fonksiyonlar search_path = pg_catalog, pg_temp ile çalışır; tüm nesne
+-- referansları şema ile niteliklidir. EXECUTE: export/apply yalnız service_role; diğer
+-- yardımcı fonksiyonlar yalnız sahip. Storage izinlerine DOKUNULMAZ.
 --
--- Erişim: backup_* tablolarına yalnız sunucu (service role) erişir; RLS açık,
--- policy yok. Fonksiyonların EXECUTE yetkisi yalnız service_role'dedir.
---
--- Geri yükleme atomikliği: PostgREST her isteği ayrı transaction'da çalıştırır
--- (çok adımlı istemci transaction'ı yoktur). Bu yüzden satırlar önce staging
--- tablosuna yazılır, ardından backup_apply_restore() TEK transaction içinde
--- silme (çocuk → ebeveyn) + ekleme (ebeveyn → çocuk) yapar. Herhangi bir
--- hata (FK, CHECK, sayı uyuşmazlığı) tüm değişikliği geri alır.
---
--- İdempotent: tekrar çalıştırılabilir. Production'a uygulanması ayrı karardır.
+-- İdempotent. Production'a uygulanması ayrı karardır.
+
+-- -----------------------------------------------------------------
+-- 0. Ön kontrol (preflight): yetersizse HİÇBİR şey oluşmadan durur
+-- -----------------------------------------------------------------
+
+do $$
+declare
+  v_role pg_roles%rowtype;
+  t text;
+begin
+  select * into v_role from pg_roles where rolname = current_user;
+
+  foreach t in array array[
+    'workspace_brands', 'workspace_projects', 'workspace_posts', 'workspace_highlights',
+    'workspace_stories', 'workspace_prefs', 'calendar_items', 'share_snapshots',
+    'share_feedback', 'share_feedback_workflow_events'
+  ] loop
+    if to_regclass('public.' || t) is null then
+      raise exception 'migration16_preflight: tablo yok: %', t;
+    end if;
+    if not (has_table_privilege(current_user, 'public.' || t, 'SELECT')
+        and has_table_privilege(current_user, 'public.' || t, 'INSERT')
+        and has_table_privilege(current_user, 'public.' || t, 'UPDATE')
+        and has_table_privilege(current_user, 'public.' || t, 'DELETE')) then
+      raise exception 'migration16_preflight: % rolünün public.% üzerinde SELECT/INSERT/UPDATE/DELETE yetkisi yok', current_user, t;
+    end if;
+    if not (v_role.rolsuper or v_role.rolbypassrls) and exists (
+      select 1 from pg_class c
+       where c.oid = to_regclass('public.' || t)
+         and (c.relowner <> v_role.oid or c.relforcerowsecurity)) then
+      raise exception 'migration16_preflight: % rolü public.% üzerinde RLS''yi atlayamaz', current_user, t;
+    end if;
+  end loop;
+
+  foreach t in array array['instagram_import_jobs', 'workspace_bootstrap'] loop
+    if to_regclass('public.' || t) is null then
+      raise exception 'migration16_preflight: tablo yok: %', t;
+    end if;
+    if not has_table_privilege(current_user, 'public.' || t, 'SELECT') then
+      raise exception 'migration16_preflight: % rolünün public.% üzerinde SELECT yetkisi yok', current_user, t;
+    end if;
+    if not (v_role.rolsuper or v_role.rolbypassrls) and exists (
+      select 1 from pg_class c
+       where c.oid = to_regclass('public.' || t)
+         and (c.relowner <> v_role.oid or c.relforcerowsecurity)) then
+      raise exception 'migration16_preflight: % rolü public.% üzerinde RLS''yi atlayamaz', current_user, t;
+    end if;
+  end loop;
+end
+$$;
 
 -- -----------------------------------------------------------------
 -- 1. backup_settings (tekil satır + kilit)
@@ -31,7 +80,6 @@
 create table if not exists public.backup_settings (
   id boolean primary key default true check (id),
   auto_enabled boolean not null default true,
-  -- Tam (DB + medya) yedek için en kısa aralık 15 dakikadır.
   interval_minutes integer not null default 1440,
   keep_last integer not null default 10,
   keep_daily_days integer not null default 7,
@@ -101,12 +149,10 @@ create table if not exists public.backup_jobs (
     or (operation = 'restore' and kind = 'restore')),
   constraint backup_jobs_status_check check (status in ('running', 'succeeded', 'failed')),
   constraint backup_jobs_actor_check check (actor in ('user', 'cron')),
-  -- Dosya adı sunucuda üretilir; yol ayırıcı veya `..` içeremez.
   constraint backup_jobs_file_name_check check (
     file_name is null or file_name ~ '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[0-9a-f]{8}\.zip$'),
   constraint backup_jobs_deleted_reason_check check (
     deleted_reason is null or deleted_reason in ('user', 'retention')),
-  -- "Başarılı" yedek dosyasız olamaz.
   constraint backup_jobs_success_file_check check (
     operation <> 'backup' or status <> 'succeeded' or file_name is not null)
 );
@@ -119,8 +165,39 @@ create unique index if not exists backup_jobs_file_name_idx
 
 alter table public.backup_jobs enable row level security;
 
+-- Devam eden restore işi, kilit sahibi restore işi ve çalışan bir restore'un
+-- kaynak/güvenlik yedeği silinemez. discardJob (operation='backup') etkilenmez.
+create or replace function public.backup_protect_running_restore()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, pg_temp
+as $$
+begin
+  if (old.operation = 'restore' and old.status = 'running')
+     or exists (
+       select 1 from public.backup_settings s
+       where s.id and s.lock_operation = 'restore' and s.lock_job_id = old.id)
+     or exists (
+       select 1 from public.backup_jobs r
+       where r.operation = 'restore' and r.status = 'running'
+         and (r.source_backup_id = old.id or r.safety_backup_id = old.id))
+  then
+    raise exception 'backup_job_in_use' using errcode = '55006';
+  end if;
+  return old;
+end
+$$;
+
+revoke all on function public.backup_protect_running_restore() from public, anon, authenticated, service_role;
+
+drop trigger if exists backup_jobs_protect_running_restore on public.backup_jobs;
+create trigger backup_jobs_protect_running_restore
+  before delete on public.backup_jobs
+  for each row execute function public.backup_protect_running_restore();
+
 -- -----------------------------------------------------------------
--- 3. backup_audit_events (ekleme-yalnız)
+-- 3. backup_audit_events (ekleme-yalnız; trigger ile zorlanır)
 -- -----------------------------------------------------------------
 
 create table if not exists public.backup_audit_events (
@@ -143,6 +220,45 @@ create index if not exists backup_audit_events_created_idx on public.backup_audi
 
 alter table public.backup_audit_events enable row level security;
 
+-- UPDATE yalnız FK "ON DELETE SET NULL" sonucu job_id / actor_user_id'nin NULL'a
+-- çekilmesine izin verir (ikisi birlikte veya ayrı); başka her UPDATE, DELETE ve
+-- TRUNCATE reddedilir. Tablo sahibi/superuser trigger'ı devre dışı bırakabilir:
+-- kasıtlı kurcalamaya karşı mutlak koruma değildir. Tablo erişimi yapmaz: INVOKER.
+create or replace function public.backup_audit_events_append_only()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, pg_temp
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.id = old.id
+       and new.created_at = old.created_at
+       and new.action = old.action
+       and new.actor = old.actor
+       and new.details = old.details
+       and (new.job_id is not distinct from old.job_id or (new.job_id is null and old.job_id is not null))
+       and (new.actor_user_id is not distinct from old.actor_user_id
+            or (new.actor_user_id is null and old.actor_user_id is not null))
+    then
+      return new;
+    end if;
+  end if;
+  raise exception 'backup_audit_events_append_only' using errcode = '42501';
+end
+$$;
+
+revoke all on function public.backup_audit_events_append_only() from public, anon, authenticated, service_role;
+
+drop trigger if exists backup_audit_events_row_guard on public.backup_audit_events;
+create trigger backup_audit_events_row_guard
+  before update or delete on public.backup_audit_events
+  for each row execute function public.backup_audit_events_append_only();
+
+drop trigger if exists backup_audit_events_truncate_guard on public.backup_audit_events;
+create trigger backup_audit_events_truncate_guard
+  before truncate on public.backup_audit_events
+  for each statement execute function public.backup_audit_events_append_only();
+
 -- -----------------------------------------------------------------
 -- 4. backup_restore_staging
 -- -----------------------------------------------------------------
@@ -151,7 +267,7 @@ create table if not exists public.backup_restore_staging (
   job_id uuid not null references public.backup_jobs (id) on delete cascade,
   table_name text not null,
   ord integer not null,
-  row jsonb not null,
+  "row" jsonb not null,
   primary key (job_id, table_name, ord)
 );
 
@@ -159,8 +275,7 @@ alter table public.backup_restore_staging enable row level security;
 
 -- -----------------------------------------------------------------
 -- 5. workspace_sync_state (geri yükleme epoch'u)
---    İstemci açılışta okur; yerel kopyası farklı epoch'a aitse yerel
---    önbelleği atar ve buluttan yeniden yükler. Hassas veri içermez.
+--    İstemci yalnız restore_epoch'u okur; restored_from (iç iş kimliği) gizlidir.
 -- -----------------------------------------------------------------
 
 create table if not exists public.workspace_sync_state (
@@ -181,20 +296,32 @@ create policy workspace_sync_state_read on public.workspace_sync_state
 
 -- -----------------------------------------------------------------
 -- 6. Geri yükleme sırasında yazma koruması
---    Kilit 'restore' iken (ve kalp atışı tazeyken) geri yükleme kapsamındaki
---    tablolara yazım reddedilir; aksi halde açık bir sekmenin otomatik
---    kaydı geri yüklenen veriyle yarışabilir. Geri yükleme fonksiyonu
---    transaction'a özel bir bayrakla bu korumayı aşar.
+--    Bypass = transaction'a özel bayrak == kilidi tutan restore işinin UUID'si.
 -- -----------------------------------------------------------------
+
+create or replace function public.backup_restore_bypass_active()
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, pg_temp
+as $$
+  select exists (
+    select 1 from public.backup_settings s
+    where s.id and s.lock_operation = 'restore' and s.lock_job_id is not null
+      and s.lock_job_id::text = coalesce(pg_catalog.current_setting('dijivo.backup_restore', true), ''));
+$$;
+
+revoke all on function public.backup_restore_bypass_active() from public, anon, authenticated, service_role;
 
 create or replace function public.backup_block_writes_during_restore()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, pg_temp
+set search_path = pg_catalog, pg_temp
 as $$
 begin
-  if coalesce(current_setting('dijivo.backup_restore', true), '') = 'on' then
+  if public.backup_restore_bypass_active() then
     return null;
   end if;
   if exists (
@@ -208,7 +335,7 @@ begin
 end
 $$;
 
-revoke all on function public.backup_block_writes_during_restore() from public, anon, authenticated;
+revoke all on function public.backup_block_writes_during_restore() from public, anon, authenticated, service_role;
 
 do $$
 declare
@@ -221,23 +348,22 @@ begin
   ] loop
     execute format('drop trigger if exists backup_restore_write_guard on public.%I', t);
     execute format(
-      'create trigger backup_restore_write_guard before insert or update or delete on public.%I '
+      'create trigger backup_restore_write_guard before insert or update or delete or truncate on public.%I '
       'for each statement execute function public.backup_block_writes_during_restore()', t);
   end loop;
 end
 $$;
 
 -- -----------------------------------------------------------------
--- 7. backup_export_snapshot(): TEK ifadede tutarlı anlık görüntü
---    (tek SELECT = tek MVCC snapshot; tablolar birbiriyle tutarlı).
---    auth.users, Vault sırları ve backup_* tabloları DAHİL DEĞİLDİR.
+-- 7. backup_export_snapshot(): TEK ifadede tutarlı anlık görüntü (SECURITY DEFINER)
 -- -----------------------------------------------------------------
 
 create or replace function public.backup_export_snapshot()
 returns jsonb
 language sql
 stable
-set search_path = public, pg_temp
+security definer
+set search_path = pg_catalog, pg_temp
 set statement_timeout = '300s'
 as $$
   select jsonb_build_object(
@@ -260,20 +386,18 @@ as $$
 $$;
 
 -- -----------------------------------------------------------------
--- 8. backup_apply_restore(): staging'deki satırlarla atomik değiştirme
---    - Yalnız kilidi tutan, çalışan 'restore' işi çağırabilir.
---    - Her tablo için beklenen satır sayısı staging ve ekleme sonrası
---      doğrulanır; uyuşmazlıkta tüm transaction geri alınır.
---    - Kolon listesi tablo kolonları ∩ yedekteki anahtarlar: yedekte olmayan
---      yeni kolonlar varsayılan değerini alır, artık olmayan kolonlar yok sayılır.
---    - instagram_import_jobs ve workspace_bootstrap'a DOKUNULMAZ.
+-- 8. backup_apply_restore(): staging'deki satırlarla atomik değiştirme (SECURITY DEFINER)
+--    Kilit sırası: iş satırı → ayar satırı (FOR UPDATE) → 10 tabloya SHARE ROW EXCLUSIVE.
+--    Silme çocuk → ebeveyn, ekleme ebeveyn → çocuk; FK/CHECK/sayı hatası = tam geri alma.
 -- -----------------------------------------------------------------
 
 create or replace function public.backup_apply_restore(p_job_id uuid, p_expected jsonb)
 returns jsonb
 language plpgsql
-set search_path = public, pg_temp
+security definer
+set search_path = pg_catalog, pg_temp
 set statement_timeout = '300s'
+set lock_timeout = '30s'
 as $$
 declare
   v_tables constant text[] := array[
@@ -288,6 +412,7 @@ declare
   v_counts jsonb := '{}'::jsonb;
   v_epoch uuid := gen_random_uuid();
   v_source uuid;
+  v_heartbeat timestamptz;
   i integer;
 begin
   select j.source_backup_id into v_source
@@ -298,11 +423,15 @@ begin
     raise exception 'backup_restore_job_not_running';
   end if;
 
-  perform 1 from public.backup_settings s
+  select s.lock_heartbeat_at into v_heartbeat
+    from public.backup_settings s
    where s.id and s.lock_job_id = p_job_id and s.lock_operation = 'restore'
    for update;
   if not found then
     raise exception 'backup_restore_lock_missing';
+  end if;
+  if v_heartbeat is null or v_heartbeat <= now() - interval '10 minutes' then
+    raise exception 'backup_restore_lock_stale';
   end if;
 
   foreach v_table in array v_tables loop
@@ -316,14 +445,18 @@ begin
     end if;
   end loop;
 
-  perform set_config('dijivo.backup_restore', 'on', true);
+  perform set_config('dijivo.backup_restore', p_job_id::text, true);
 
-  -- Çocuk → ebeveyn silme (where true: pg_safeupdate açıksa da çalışır).
+  lock table public.workspace_brands, public.workspace_projects, public.workspace_posts,
+    public.workspace_highlights, public.workspace_stories, public.workspace_prefs,
+    public.calendar_items, public.share_snapshots, public.share_feedback,
+    public.share_feedback_workflow_events
+    in share row exclusive mode;
+
   for i in reverse array_length(v_tables, 1) .. 1 loop
     execute format('delete from public.%I where true', v_tables[i]);
   end loop;
 
-  -- Ebeveyn → çocuk ekleme.
   foreach v_table in array v_tables loop
     select string_agg(quote_ident(a.attname), ', ' order by a.attnum),
            string_agg('r.' || quote_ident(a.attname), ', ' order by a.attnum)
@@ -333,12 +466,12 @@ begin
        and a.attnum > 0 and not a.attisdropped and a.attgenerated = ''
        and exists (
          select 1 from public.backup_restore_staging s
-          where s.job_id = p_job_id and s.table_name = v_table and s.row ? a.attname::text);
+          where s.job_id = p_job_id and s.table_name = v_table and jsonb_exists(s."row", a.attname::text));
     v_count := 0;
     if v_cols is not null then
       execute format(
         'insert into public.%I (%s) select %s from public.backup_restore_staging s '
-        'cross join lateral jsonb_populate_record(null::public.%I, s.row) r '
+        'cross join lateral pg_catalog.jsonb_populate_record(null::public.%I, s."row") r '
         'where s.job_id = $1 and s.table_name = $2 order by s.ord',
         v_table, v_cols, v_select, v_table)
         using p_job_id, v_table;
@@ -357,27 +490,78 @@ begin
   on conflict (id) do update
     set restore_epoch = excluded.restore_epoch, restored_at = excluded.restored_at, restored_from = excluded.restored_from;
 
-  -- Aynı transaction'da işaretlenir: yanıt ağda kaybolsa bile sunucu DB
-  -- değişikliğinin işlendiğini buradan anlar.
   update public.backup_jobs
      set summary = summary || jsonb_build_object('dbCommittedAt', now(), 'epoch', v_epoch, 'restoredCounts', v_counts)
    where id = p_job_id;
 
-  perform set_config('dijivo.backup_restore', 'off', true);
+  perform set_config('dijivo.backup_restore', '', true);
   return jsonb_build_object('counts', v_counts, 'epoch', v_epoch);
 end
 $$;
 
 -- -----------------------------------------------------------------
--- 9. Yetkiler: tablolar ve fonksiyonlar yalnız service_role
+-- 9. ACL sıfırlama (YALNIZ bu migration'ın 5 tablosu ve 6 fonksiyonu; storage'a DOKUNULMAZ)
+--    Varsayılan ACL'den gelen ek yetkiler (service_role dahil) önce temizlenir,
+--    sonra yalnız gerekenler verilir.
 -- -----------------------------------------------------------------
 
 revoke all on table public.backup_settings, public.backup_jobs, public.backup_audit_events,
-  public.backup_restore_staging from anon, authenticated;
-revoke all on table public.workspace_sync_state from anon, authenticated;
-grant select on table public.workspace_sync_state to authenticated;
+  public.backup_restore_staging, public.workspace_sync_state
+  from public, anon, authenticated, service_role;
 
-revoke all on function public.backup_export_snapshot() from public, anon, authenticated;
-revoke all on function public.backup_apply_restore(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.backup_export_snapshot() from public, anon, authenticated, service_role;
+revoke all on function public.backup_apply_restore(uuid, jsonb) from public, anon, authenticated, service_role;
+
+-- Statik REVOKE'ların görmediği diğer alıcılar (ör. varsayılan ACL ile gelenler).
+do $$
+declare
+  r record;
+begin
+  for r in
+    select c.oid::regclass::text as rel, a.grantee
+      from pg_class c
+      cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+     where c.relnamespace = 'public'::regnamespace
+       and c.relname in ('backup_settings', 'backup_jobs', 'backup_audit_events',
+                         'backup_restore_staging', 'workspace_sync_state')
+       and a.grantee <> c.relowner
+     group by 1, 2
+  loop
+    execute format('revoke all on table %s from %s', r.rel,
+      case when r.grantee = 0 then 'public' else quote_ident(pg_get_userbyid(r.grantee)) end);
+  end loop;
+
+  for r in
+    select p.oid::regprocedure::text as sig, a.grantee
+      from pg_proc p
+      cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+     where p.pronamespace = 'public'::regnamespace
+       and p.proname in ('backup_export_snapshot', 'backup_apply_restore', 'backup_restore_bypass_active',
+                         'backup_block_writes_during_restore', 'backup_protect_running_restore',
+                         'backup_audit_events_append_only')
+       and a.privilege_type = 'EXECUTE'
+       and a.grantee <> p.proowner
+     group by 1, 2
+  loop
+    execute format('revoke all on function %s from %s', r.sig,
+      case when r.grantee = 0 then 'public' else quote_ident(pg_get_userbyid(r.grantee)) end);
+  end loop;
+end
+$$;
+
+-- -----------------------------------------------------------------
+-- 10. Yetkiler (en az ayrıcalık; uygulama akışlarına göre, bkz. src/lib/backup/supabase.ts)
+-- -----------------------------------------------------------------
+
+grant select, insert, update on table public.backup_settings to service_role;
+grant select, insert, update, delete on table public.backup_jobs to service_role;
+grant insert on table public.backup_audit_events to service_role;
+-- clearStaging: DELETE ... WHERE job_id = $1 → job_id kolonunda SELECT gerekir.
+grant insert, delete on table public.backup_restore_staging to service_role;
+grant select (job_id) on table public.backup_restore_staging to service_role;
+
+-- workspace_sync_state: service_role'e tablo yetkisi YOK (yazma yalnız DEFINER fonksiyonla).
+grant select (id, restore_epoch, restored_at) on table public.workspace_sync_state to authenticated;
+
 grant execute on function public.backup_export_snapshot() to service_role;
 grant execute on function public.backup_apply_restore(uuid, jsonb) to service_role;

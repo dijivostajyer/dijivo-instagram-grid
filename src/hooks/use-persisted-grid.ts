@@ -40,12 +40,14 @@ import {
   selectBrandState,
   selectProjectState,
   removeBrandState,
+  resolveProjectMonthConflicts,
   syncActiveProject,
   updateBrandState,
 } from "../lib/brand-ops";
 import type { NewBrandInput, PostCopyOptions } from "../lib/brand-ops";
+import { duplicateMonthMessage } from "../lib/project-ops";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
-import { pullWorkspace, pushWorkspace, reconcileWorkspaceState, type WorkspaceMediaUploadCache } from "../lib/workspace-store";
+import { ProjectMonthConflictError, pullWorkspace, pushWorkspace, reconcileWorkspaceState, type WorkspaceMediaUploadCache } from "../lib/workspace-store";
 import {
   duplicateWorkspaceMedia,
   isWorkspaceMediaRef,
@@ -63,6 +65,20 @@ import {
 } from "../lib/story-ops";
 import { withBasePath } from "../lib/base-path";
 import {
+  changedEntities,
+  computeRemovedIds,
+  fingerprintState,
+  idsOfFingerprints,
+  readBaseline,
+  readSyncClean,
+  shouldTrustRemote,
+  workspaceSignature,
+  writeBaseline,
+  writeSyncClean,
+  EMPTY_SYNCED_IDS,
+  type SyncFingerprints,
+} from "../lib/workspace-sync";
+import {
   RESTORED_ELSEWHERE_MESSAGE,
   markRestoreNotice,
   readLocalEpoch,
@@ -77,6 +93,17 @@ import {
  */
 export type { PostCopyOptions, NewBrandInput } from "../lib/brand-ops";
 export { getDefaultAppState };
+
+const WORKSPACE_REFRESH_INTERVAL_MS = 30_000;
+/** İki uzak çekim arasındaki en kısa süre (odak/görünürlük olaylarının birleştirilmesi için). */
+const MIN_REFRESH_GAP_MS = 10_000;
+
+/** Kullanıcı bir metin alanında yazıyorsa uzak durum uygulanmaz (imleç/taslak korunur). */
+function isEditingText(): boolean {
+  const element = document.activeElement;
+  if (!(element instanceof HTMLElement)) return false;
+  return element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement || element.isContentEditable;
+}
 
 function getBrowserStorage(): StorageLike | null {
   try {
@@ -209,6 +236,10 @@ export interface PersistedGrid {
   ready: boolean;
   /** Uzak workspace yazımı başarısız olursa kullanıcıya gösterilecek hata. */
   syncError: string | null;
+  /** Bekleyen bulut yazımı kalmadığında artan sayaç (takvim gibi buluta bağımlı okumaları yeniden denemek için). */
+  syncSettledTick: number;
+  /** Şu an kuyrukta/yolda bulut yazımı var mı? */
+  isCloudSyncPending: () => boolean;
   /** Marka kayıt defteri (tüm markalar). */
   brands: Brand[];
   /** Aktif marka kimliği; boşsa henüz marka yoktur (onboarding). */
@@ -281,6 +312,8 @@ export function usePersistedGrid(): PersistedGrid {
   const [ready, setReady] = useState(false);
   const [uploadTick, setUploadTick] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // Her "bekleyen bulut yazımı kalmadı" anında artar (bkz. persist efektinin finally'si).
+  const [syncSettledTick, setSyncSettledTick] = useState(0);
 
   const refByObjectUrl = useRef<Map<string, string>>(new Map());
   const trackedObjectUrls = useRef<Set<string>>(new Set());
@@ -296,8 +329,58 @@ export function usePersistedGrid(): PersistedGrid {
   const epochRef = useRef<string | null | undefined>(undefined);
   // Geri yükleme sonrası veya başka sekmede geri yükleme fark edilince: yazım yok.
   const syncPausedRef = useRef(false);
+  // Bu cihazın buluttaki son bilinen durumu (varlık parmak izleri): yalnız bundan farklı
+  // varlıklar buluta yazılır; bundan çıkan kimlikler buluttan silinir.
+  const baselineRef = useRef<SyncFingerprints | null>(null);
+  const lastRefreshAtRef = useRef(0);
+  // Kuyrukta/yolda yazım sayısı ve son yazımın başarısı: bunlar yokken uzak veri
+  // yerel durumun yerine güvenle alınabilir (başka cihazın değişikliği).
+  const pendingPushesRef = useRef(0);
+  const unsyncedRef = useRef(false);
+  const refreshingRef = useRef(false);
+  // Aynı ay planı çakışması bildirimi: sonraki başarılı eşitleme hata bandını silmesin.
+  const planConflictNoticeRef = useRef<string | null>(null);
 
   stateRef.current = state;
+
+  /** Kuyrukta veya yolda bulut yazımı var mı? (Başarısız olmuş eski yazım bekleyen sayılmaz.) */
+  const isCloudSyncPending = useCallback(() => pendingPushesRef.current > 0, []);
+
+  // Veritabanı aynı marka/ay/yıl için ikinci planı reddetti (eşzamanlı istek veya eski veri):
+  // buluttaki gerçek liste yeniden okunur, hiç kaydedilememiş yerel plan sahte kayıt olarak
+  // atılır ve kullanıcıya Türkçe açıklama gösterilir. Başka hiçbir veri atılmaz.
+  const recoverProjectMonthConflict = useCallback(async () => {
+    const user = workspaceUserRef.current;
+    const fallback = "Aynı marka için aynı ay planı zaten mevcut; plan listesi yeniden yüklenemedi. Sayfayı yenileyip farklı bir ay seçin.";
+    try {
+      const remote = user ? await pullWorkspace(user) : null;
+      if (!remote) {
+        planConflictNoticeRef.current = fallback;
+        setSyncError(fallback);
+        return;
+      }
+      const hydratedRemote = await hydrateState(remote, refByObjectUrl.current, trackedObjectUrls.current);
+      const { state: next, dropped } = resolveProjectMonthConflicts(stateRef.current, hydratedRemote);
+      const message = dropped.length ? duplicateMonthMessage(dropped[0].month, dropped[0].year) : fallback;
+      planConflictNoticeRef.current = message;
+      setSyncError(message);
+      if (dropped.length) {
+        stateRef.current = next;
+        setState(next);
+      }
+    } catch (error) {
+      console.error("[workspace] Plan çakışması sonrası liste yeniden yüklenemedi.", error instanceof Error ? error.name : "UnknownError");
+      planConflictNoticeRef.current = fallback;
+      setSyncError(fallback);
+    }
+  }, []);
+
+  // Medya URL'sini kanonik referansa indirger (imzalı URL → storage ref); yerel
+  // blob URL'leri kendi değerinde kalır, böylece görsel değişimi de fark edilir.
+  const canonicalMedia = useCallback(
+    (url: string) => toWorkspaceMediaRef(url, refByObjectUrl.current) ?? url,
+    [],
+  );
 
   // Açılış: kayıtlı metaveri + görsel Blob'ları yüklenir.
   useEffect(() => {
@@ -332,13 +415,44 @@ export function usePersistedGrid(): PersistedGrid {
       );
       let stored = local;
       if (user) {
+        const clean = readSyncClean(browserStorage, user.id);
+        const storedBaseline = readBaseline(browserStorage, user.id);
+        baselineRef.current = storedBaseline;
+        unsyncedRef.current = clean === false;
         try {
           const remote = await pullWorkspace(user);
-          const reconciled = reconcileWorkspaceState(remote, local);
-          // Do not treat a non-empty workspace as fully migrated. Each entity
-          // type is upserted, so missing posts/highlights heal without
-          // overwriting existing remote records with local duplicates.
-          if ((reconciled.brands?.length ?? 0) > 0) stored = await pushWorkspace(user, reconciled, mediaUploadCacheRef.current);
+          if (remote && shouldTrustRemote(clean)) {
+            // Yerel kopya son eşitlemeden beri değişmedi: uzak veri tek gerçek
+            // kaynaktır. Eski yerel kopyayı birleştirip geri yazmak başka
+            // cihazda silinen/değiştirilen kayıtları geri getiriyordu.
+            stored = remote;
+            baselineRef.current = fingerprintState(remote, canonicalMedia);
+            writeBaseline(browserStorage, user.id, baselineRef.current);
+          } else if (!remote && clean === true) {
+            // Bulut boş ama bu cihaz en son temiz eşitlenmişti: çalışma alanı başka
+            // bir cihazdan temizlendi. Eski yerel kopya buluta geri yazılmaz.
+            clearPersistedState(browserStorage);
+            await clearStoredImages().catch(() => undefined);
+            await clearStoredVideos().catch(() => undefined);
+            stored = getDefaultAppState();
+            baselineRef.current = null;
+            writeBaseline(browserStorage, user.id, null);
+          } else {
+            const reconciled = reconcileWorkspaceState(remote, local, { baseline: storedBaseline, canonical: canonicalMedia });
+            // Do not treat a non-empty workspace as fully migrated. Entities are
+            // upserted, so missing posts/highlights heal; with a remote copy only
+            // what differs from it (local-only or locally edited) is written.
+            if ((reconciled.brands?.length ?? 0) > 0) {
+              const scope = remote
+                ? changedEntities(fingerprintState(reconciled, canonicalMedia), fingerprintState(remote, canonicalMedia))
+                : undefined;
+              stored = await pushWorkspace(user, reconciled, mediaUploadCacheRef.current, EMPTY_SYNCED_IDS, scope);
+              baselineRef.current = fingerprintState(stored, canonicalMedia);
+              writeBaseline(browserStorage, user.id, baselineRef.current);
+              writeSyncClean(browserStorage, user.id, true);
+              unsyncedRef.current = false;
+            }
+          }
         } catch (error) {
           console.warn("[workspace] Uzak workspace yüklenemedi; yerel kopya kullanılacak.", error);
         }
@@ -399,6 +513,9 @@ export function usePersistedGrid(): PersistedGrid {
       // finish after a newer one and restore stale rows following an upload.
       const snapshot = stateRef.current;
       const sequence = ++syncSequenceRef.current;
+      pendingPushesRef.current += 1;
+      unsyncedRef.current = true;
+      writeSyncClean(browserStorage, user.id, false);
       syncChainRef.current = syncChainRef.current
         .catch(() => undefined)
         .then(async () => {
@@ -413,18 +530,117 @@ export function usePersistedGrid(): PersistedGrid {
               return;
             }
           }
-          await pushWorkspace(user, snapshot, mediaUploadCacheRef.current);
-          if (sequence === syncSequenceRef.current) setSyncError(null);
+          // Yalnız baseline'dan değişen varlıklar yazılır; baseline'da olup artık
+          // olmayan gönderi/öne çıkanlar (bu cihazda silinenler) buluttan silinir.
+          const currentFingerprints = fingerprintState(snapshot, canonicalMedia);
+          const baseline = baselineRef.current;
+          await pushWorkspace(
+            user, snapshot, mediaUploadCacheRef.current,
+            baseline ? computeRemovedIds(idsOfFingerprints(baseline), idsOfFingerprints(currentFingerprints)) : EMPTY_SYNCED_IDS,
+            baseline ? changedEntities(currentFingerprints, baseline) : undefined,
+          );
+          baselineRef.current = currentFingerprints;
+          writeBaseline(browserStorage, user.id, currentFingerprints);
+          if (sequence === syncSequenceRef.current) {
+            setSyncError(planConflictNoticeRef.current);
+            unsyncedRef.current = false;
+            writeSyncClean(browserStorage, user.id, true);
+          }
         })
         .catch((error) => {
+          if (error instanceof ProjectMonthConflictError) {
+            console.warn("[workspace] Aynı marka/ay planı çakışması; bulut listesi yeniden yüklenecek.");
+            void recoverProjectMonthConflict();
+            return;
+          }
           const detail = error instanceof Error ? error.message : "Bilinmeyen hata";
           console.error("[workspace] Uzak sync başarısız; yerel kopya korundu.", error);
           if (sequence === syncSequenceRef.current) {
             setSyncError(`Değişiklikler buluta kaydedilemedi: ${detail}`);
           }
+        })
+        .finally(() => {
+          pendingPushesRef.current -= 1;
+          // Kuyruktaki tüm yazımlar bitti (başarılı ya da başarısız): bulut verisine bağımlı
+          // okumalar (ör. takvim yetkilendirmesi) yeniden denenebilir.
+          if (pendingPushesRef.current === 0) setSyncSettledTick((tick) => tick + 1);
         });
     }
-  }, [state, ready, uploadTick]);
+  }, [state, ready, uploadTick, canonicalMedia, recoverProjectMonthConflict]);
+
+  // Başka cihazda yapılan değişiklikleri görmek için: sekme tekrar görünür/odaklı
+  // olunca ve düzenli aralıkla uzak veri çekilir. Yalnız yerelde bekleyen/başarısız
+  // yazım yokken ve kullanıcı bir alana yazmıyorken uygulanır; böylece yerel
+  // düzenleme ezilmez ve imleç kaymaz.
+  useEffect(() => {
+    if (!ready) return;
+    const refresh = async () => {
+      const user = workspaceUserRef.current;
+      if (!user || refreshingRef.current || syncPausedRef.current) return;
+      if (document.visibilityState === "hidden") return;
+      const canApply = (startedWith: PersistedAppState) =>
+        stateRef.current === startedWith &&
+        pendingPushesRef.current === 0 &&
+        !unsyncedRef.current &&
+        !syncPausedRef.current &&
+        !isEditingText();
+      const startedWith = stateRef.current;
+      if (!canApply(startedWith)) return;
+      // Odak + görünürlük olayları art arda gelir; sık çekim yapılmaz.
+      if (Date.now() - lastRefreshAtRef.current < MIN_REFRESH_GAP_MS) return;
+      lastRefreshAtRef.current = Date.now();
+      refreshingRef.current = true;
+      try {
+        const remote = await pullWorkspace(user);
+        if (!remote || !canApply(startedWith)) return;
+        const hydrated = await hydrateState(remote, refByObjectUrl.current, trackedObjectUrls.current);
+        if (!canApply(startedWith)) return;
+        const canonical = (url: string) =>
+          url.startsWith("blob:") || url.startsWith("idb") ? "@local" : toWorkspaceMediaRef(url, refByObjectUrl.current) ?? url;
+        if (workspaceSignature(hydrated, canonical) === workspaceSignature(startedWith, canonical)) {
+          // İçerik bulutla aynı: baseline'ı bu duruma eşitle.
+          baselineRef.current = fingerprintState(startedWith, canonicalMedia);
+          writeBaseline(getBrowserStorage(), user.id, baselineRef.current);
+          return;
+        }
+        // Aktif marka/proje seçimi cihaza özgü görünümdür; uzak veride hâlâ varsa korunur.
+        const brandId = hydrated.brands?.some((item) => item.id === startedWith.activeBrandId) ? startedWith.activeBrandId : hydrated.activeBrandId;
+        const projectId = hydrated.projects?.some((item) => item.id === startedWith.activeProjectId) ? startedWith.activeProjectId : hydrated.activeProjectId;
+        const next = syncActiveProject({
+          ...hydrated,
+          activeBrandId: brandId,
+          activeProjectId: projectId,
+          brand: hydrated.brands?.find((item) => item.id === brandId) ?? hydrated.brand,
+        });
+        baselineRef.current = fingerprintState(next, canonicalMedia);
+        writeBaseline(getBrowserStorage(), user.id, baselineRef.current);
+        skipPersistRef.current = true;
+        writePersistedState(getBrowserStorage(), toPersistableState(next, refByObjectUrl.current));
+        stateRef.current = next;
+        setState(next);
+      } catch (error) {
+        console.warn("[workspace] Uzak değişiklikler çekilemedi.", error);
+      } finally {
+        refreshingRef.current = false;
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    const onFocus = () => { void refresh(); };
+    // Bağlantı geri gelince yazılamayan değişiklikler kullanıcı eylemi beklemeden yeniden denenir.
+    const onOnline = () => {
+      if (unsyncedRef.current && pendingPushesRef.current === 0 && !syncPausedRef.current) setUploadTick((tick) => tick + 1);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    const interval = window.setInterval(() => { void refresh(); }, WORKSPACE_REFRESH_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      window.clearInterval(interval);
+    };
+  }, [ready, canonicalMedia]);
 
   const commit = useCallback((next: PersistedAppState) => {
     stateRef.current = next;
@@ -711,6 +927,7 @@ export function usePersistedGrid(): PersistedGrid {
   const createProject = useCallback((name: string, month: number, year: number, copyPrevious: boolean): string | null => {
     const result = createProjectState(stateRef.current, name, month, year, copyPrevious);
     if ("error" in result) return result.error;
+    planConflictNoticeRef.current = null;
     commit(result.state);
     if (copyPrevious) void detachCopiedStoryMedia(result.projectId);
     return null;
@@ -755,6 +972,8 @@ export function usePersistedGrid(): PersistedGrid {
     plannedPosts: state.plannedPosts,
     ready,
     syncError,
+    syncSettledTick,
+    isCloudSyncPending,
     brands: state.brands ?? [],
     activeBrandId: state.activeBrandId ?? "",
     createBrand,

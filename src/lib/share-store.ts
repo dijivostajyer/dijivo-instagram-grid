@@ -10,8 +10,16 @@ import { SupabaseShareStore, createSupabaseShareDriver } from "./supabase-share-
 import { getShareStorageConfig } from "./share-config";
 
 /** Production veritabanı adapter'ının karşılayacağı paylaşım depolama sözleşmesi. */
+export interface ShareCreateOptions {
+  /**
+   * Oturumdaki kullanıcı. Girdide `storage:workspace-media/…` referansı varsa
+   * yalnız `<ownerId>/…` altındaki nesneler Storage'dan kopyalanabilir.
+   */
+  ownerId?: string;
+}
+
 export interface ShareStore {
-  create(input: ShareSnapshotInput): Promise<ShareSnapshot>;
+  create(input: ShareSnapshotInput, options?: ShareCreateOptions): Promise<ShareSnapshot>;
   get(token: string): Promise<ShareSnapshot | null>;
   /**
    * Geçerli snapshot'ı medya URL'lerini çözmeden döndürür (geri bildirim

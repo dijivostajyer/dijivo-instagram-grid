@@ -48,3 +48,14 @@ export function isPlayableVideoUrl(value: string | undefined): value is string {
     return false;
   }
 }
+
+/**
+ * Reel'in video'dan ayrı kapak görseli. Kapak yoksa veya "kapak" aslında
+ * videonun kendisiyse (kapaksız reel'de görsel yuvası video referansı olabilir)
+ * `undefined` döner; bu durumda kapak sekmesi gösterilmez.
+ */
+export function getReelCoverUrl(post: { coverImageUrl?: string; videoUrl?: string }): string | undefined {
+  const cover = post.coverImageUrl;
+  if (!cover || cover === post.videoUrl) return undefined;
+  return cover;
+}

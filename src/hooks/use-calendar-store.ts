@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -41,6 +42,21 @@ export interface UseCalendarStoreResult {
 interface UseCalendarStoreOptions {
   brandId: string;
   projectId: string;
+  /**
+   * Buluta kuyrukta/yolda yazım var mı? Takvim API'si marka/planın bulutta kayıtlı olmasını ister;
+   * yalnızca eşitleme sürerken alınan 404 geçici sayılır. Eşitleme bitmişken alınan 404 (başka kullanıcının
+   * veya olmayan marka) ASLA boş liste/başarı sayılmaz.
+   */
+  isSyncPending?: () => boolean;
+  /** Bekleyen bulut yazımı kalmadığında artan sayaç (yeniden yükleme tetikleyicisi). */
+  syncSettledTick?: number;
+}
+
+/** Eşitleme kaynaklı geçici 404 için en fazla bu kadar otomatik yeniden yükleme. */
+const MAX_SYNC_RETRIES = 3;
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 404;
 }
 
 interface CalendarConfigResponse {
@@ -59,7 +75,7 @@ interface CalendarConfigResponse {
 export function useCalendarStore(
   options: UseCalendarStoreOptions,
 ): UseCalendarStoreResult {
-  const { brandId, projectId } = options;
+  const { brandId, projectId, isSyncPending, syncSettledTick = 0 } = options;
   const [store, setStore] = useState<CalendarStoreLike | null>(null);
   const [usingSupabase, setUsingSupabase] = useState(false);
   const [items, setItems] = useState<CalendarItem[]>([]);
@@ -67,6 +83,14 @@ export function useCalendarStore(
   const [loadState, setLoadState] = useState<CalendarLoadState>("idle");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Yükleme yarışlarını (hızlı marka değişimi) ve eşitleme-yeniden deneme durumunu izler.
+  const loadSeqRef = useRef(0);
+  const awaitingSyncRef = useRef(false);
+  const syncRetriesRef = useRef(0);
+  const isSyncPendingRef = useRef(isSyncPending);
+  isSyncPendingRef.current = isSyncPending;
+  const syncTickRef = useRef(syncSettledTick);
+  syncTickRef.current = syncSettledTick;
 
   // §22/§28: depo seçimi — Supabase varsa API katmanı,
   // yoksa yerel depo. Secret asla istemciye gitmez.
@@ -103,12 +127,14 @@ export function useCalendarStore(
 
   const load = useCallback(
     async (activeStore: CalendarStoreLike) => {
+      const sequence = ++loadSeqRef.current;
       if (!brandId || !projectId) {
         setItems([]);
         setBrandItems([]);
         setLoadState("idle");
         return;
       }
+      const tickAtStart = syncTickRef.current;
       setLoadState("loading");
       try {
         const [projectItems, allBrandItems] =
@@ -116,10 +142,31 @@ export function useCalendarStore(
             activeStore.list(brandId, projectId),
             activeStore.listAll(brandId),
           ]);
+        // Marka/plan bu arada değiştiyse eski yanıt yeni durumun üzerine yazılmaz.
+        if (sequence !== loadSeqRef.current) return;
+        awaitingSyncRef.current = false;
+        syncRetriesRef.current = 0;
         setItems(projectItems);
         setBrandItems(allBrandItems);
         setLoadState("ready");
       } catch (error) {
+        if (sequence !== loadSeqRef.current) return;
+        // 404 yalnızca eşitleme sürüyorsa (veya istek sırasında bitmişse) geçici kabul edilir ve sınırlı
+        // sayıda yeniden denenir. Aksi halde (eşitleme bitmiş) gerçek hata: asla boş "başarı" gösterilmez.
+        if (isNotFound(error) && syncRetriesRef.current < MAX_SYNC_RETRIES) {
+          const pending = isSyncPendingRef.current?.() === true;
+          const settledDuringRequest = syncTickRef.current !== tickAtStart;
+          if (pending || settledDuringRequest) {
+            syncRetriesRef.current += 1;
+            if (pending) {
+              awaitingSyncRef.current = true; // eşitleme bitince yeniden yüklenir
+              return; // yükleniyor durumu korunur
+            }
+            void load(activeStore);
+            return;
+          }
+        }
+        awaitingSyncRef.current = false;
         console.error("[calendar] Kayıtlar yüklenemedi:", error);
         setLoadState("error");
       }
@@ -129,9 +176,22 @@ export function useCalendarStore(
 
   // Marka/proje değişince yeniden yükle (§23/§24).
   useEffect(() => {
-    if (!store || !brandId || !projectId) return;
+    syncRetriesRef.current = 0;
+    awaitingSyncRef.current = false;
+    if (!store || !brandId || !projectId) {
+      loadSeqRef.current += 1; // uçuştaki eski yanıtı geçersiz kıl
+      return;
+    }
     void load(store);
   }, [store, brandId, projectId, load]);
+
+  // Eşitleme bitince, geçici 404 yüzünden bekleyen yükleme bir kez yeniden denenir.
+  useEffect(() => {
+    if (!store || !awaitingSyncRef.current) return;
+    if (isSyncPendingRef.current?.() === true) return;
+    awaitingSyncRef.current = false;
+    void load(store);
+  }, [syncSettledTick, store, load]);
 
   /** §36: optimistic create — hata durumunda rollback. */
   const createItem = useCallback(

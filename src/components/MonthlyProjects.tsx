@@ -6,7 +6,15 @@ import { CalendarDaysIcon, DocumentDuplicateIcon, PlusIcon } from "@heroicons/re
 import MiniGridPreview from "@/components/MiniGridPreview";
 import { computeGrid } from "@/lib/grid";
 import { computePlanStats } from "@/lib/plan-stats";
-import { monthLabel, monthName } from "@/lib/project-ops";
+import {
+  duplicateMonthMessage,
+  findProjectForMonth,
+  firstFreeMonth,
+  monthLabel,
+  monthName,
+  projectBrandId,
+  takenMonthsOfYear,
+} from "@/lib/project-ops";
 import type { GridProject } from "@/lib/storage";
 
 function formatUpdated(iso: string): string {
@@ -37,6 +45,8 @@ export default function MonthlyProjects({
   shareLink,
   onOpen,
   onCreate,
+  brandId,
+  loading = false,
 }: {
   projects: GridProject[];
   activeProjectId: string;
@@ -45,8 +55,14 @@ export default function MonthlyProjects({
   /** Projeyi aktif yapar ve planner'a götürür (Planı Aç). */
   onOpen: (id: string) => void;
   onCreate: (name: string, month: number, year: number, copyPrevious: boolean) => string | null;
+  /** Aktif marka: aynı marka + ay + yıl için tek plan kuralı bu markaya göre denetlenir. */
+  brandId?: string;
+  /** Plan listesi yüklenirken form gönderimi engellenir. */
+  loading?: boolean;
 }) {
   const [creator, setCreator] = useState<CreatorPrefill | null>(null);
+  // `projects` aktif markanın planlarıdır; marka verilmemişse ilk planın markası kullanılır.
+  const activeBrandId = brandId ?? (projects[0] ? projectBrandId(projects[0]) : "");
 
   const years = useMemo(() => {
     const byYear = new Map<number, Map<number, GridProject[]>>();
@@ -100,7 +116,7 @@ export default function MonthlyProjects({
             Dijivo / Aylık Planlar
           </p>
           <p className="mt-1 text-sm text-neutral-500">
-            Her ay için bir veya daha fazla plan oluşturun; önceki ayı kopyalayarak başlayın.
+            Her marka için her ayın tek bir aylık planı olur; yeni bir ay ekleyin veya önceki ayı kopyalayarak başlayın.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -142,6 +158,9 @@ export default function MonthlyProjects({
           <ProjectCreator
             key={`${creator.month}-${creator.year}-${creator.copy}`}
             initial={creator}
+            brandId={activeBrandId}
+            projects={projects}
+            loading={loading}
             onCreate={(name, month, year, copyPrevious) => {
               const error = onCreate(name, month, year, copyPrevious);
               if (!error) setCreator(null);
@@ -198,11 +217,6 @@ export default function MonthlyProjects({
                       <h4 className="text-sm font-semibold text-neutral-800">
                         {monthName(monthGroup.month)}
                       </h4>
-                      {monthGroup.items.length > 1 ? (
-                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
-                          {monthGroup.items.length} proje
-                        </span>
-                      ) : null}
                     </div>
                     <div className="grid gap-4 lg:grid-cols-2">
                       {monthGroup.items.map((project) => (
@@ -381,23 +395,56 @@ function PlanCard({
 /** Yeni aylık plan oluşturma formu (önceki ayı kopyalama dahil). */
 function ProjectCreator({
   initial,
+  brandId,
+  projects,
+  loading,
   onCreate,
 }: {
   initial?: CreatorPrefill;
+  brandId: string;
+  projects: GridProject[];
+  loading: boolean;
   onCreate: (name: string, month: number, year: number, copyPrevious: boolean) => string | null;
 }) {
   const now = new Date();
   const [name, setName] = useState("");
-  const [month, setMonth] = useState(initial?.month ?? now.getMonth() + 1);
   const [year, setYear] = useState(initial?.year ?? now.getFullYear());
+  const [month, setMonth] = useState(() => {
+    // Yalnızca gerçekten oluşturulabilir bir ay önerilir (varsa istenen ay, yoksa ilk boş ay).
+    const wanted = initial?.month ?? now.getMonth() + 1;
+    return firstFreeMonth(takenMonthsOfYear(projects, brandId, initial?.year ?? now.getFullYear()), wanted) ?? wanted;
+  });
   const [copyPrevious, setCopyPrevious] = useState(initial?.copy ?? false);
   const [error, setError] = useState<string | null>(null);
+
+  const takenMonths = useMemo(() => takenMonthsOfYear(projects, brandId, year), [projects, brandId, year]);
+  const yearValid = Number.isInteger(year) && year >= 2000;
+  const existing = yearValid && !loading ? findProjectForMonth(projects, brandId, month, year) : null;
+  const allTaken = yearValid && takenMonths.size >= 12;
+  // Seçilen ay doluysa kullanıcıya nedenini alanın yanında açıklarız; gönderim kapalıdır.
+  const fieldMessage = existing ? duplicateMonthMessage(month, year) : null;
+  const blocked = loading || !brandId || !yearValid || existing !== null;
+  const takenList = [...takenMonths].sort((a, b) => a - b).map((item) => monthName(item));
+
+  function changeYear(next: number) {
+    setYear(next);
+    setError(null);
+    if (Number.isInteger(next) && next >= 2000) {
+      const taken = takenMonthsOfYear(projects, brandId, next);
+      // Seçili ay yeni yılda doluysa ilk boş aya geç; hepsi doluysa seçim olduğu gibi kalır (form kapalı).
+      if (taken.has(month)) setMonth(firstFreeMonth(taken, month) ?? month);
+    }
+  }
 
   return (
     <form
       className="flex flex-wrap items-end gap-3"
       onSubmit={(event) => {
         event.preventDefault();
+        if (blocked) {
+          setError(fieldMessage ?? (loading ? "Mevcut planlar yükleniyor; lütfen bekleyin." : "Geçerli bir ay ve yıl seçin."));
+          return;
+        }
         const result = onCreate(name, month, year, copyPrevious);
         setError(result);
       }}
@@ -414,24 +461,33 @@ function ProjectCreator({
       </label>
       <label className="text-sm text-neutral-600">
         Ay
-        <input
+        <select
           aria-label="Ay"
-          type="number"
-          min={1}
-          max={12}
           value={month}
-          onChange={(event) => setMonth(Number(event.target.value))}
-          className="mt-1.5 block h-9 w-16 rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-sky-600"
-        />
+          aria-invalid={existing ? true : undefined}
+          aria-describedby={fieldMessage ? "plan-month-error" : undefined}
+          onChange={(event) => {
+            setMonth(Number(event.target.value));
+            setError(null);
+          }}
+          className="mt-1.5 block h-9 w-44 rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-sky-600"
+        >
+          {Array.from({ length: 12 }, (_, index) => index + 1).map((item) => (
+            <option key={item} value={item} disabled={takenMonths.has(item)}>
+              {monthName(item)}
+              {takenMonths.has(item) ? " (plan var)" : ""}
+            </option>
+          ))}
+        </select>
       </label>
       <label className="text-sm text-neutral-600">
         Yıl
         <input
           aria-label="Yıl"
           type="number"
-          min={2020}
+          min={2000}
           value={year}
-          onChange={(event) => setYear(Number(event.target.value))}
+          onChange={(event) => changeYear(Number(event.target.value))}
           className="mt-1.5 block h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-sky-600"
         />
       </label>
@@ -446,11 +502,28 @@ function ProjectCreator({
       </label>
       <button
         type="submit"
-        className="h-9 rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+        disabled={blocked}
+        className="h-9 rounded-lg bg-neutral-900 px-3 text-sm font-medium text-white hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:hover:bg-neutral-300"
       >
         Oluştur
       </button>
-      {error ? (
+      {loading ? (
+        <p role="status" className="w-full text-sm text-neutral-500">
+          Mevcut planlar yükleniyor…
+        </p>
+      ) : null}
+      {takenList.length > 0 ? (
+        <p className="w-full text-xs text-neutral-500">
+          {year} için planı olan aylar: {takenList.join(", ")}.
+          {allTaken ? " Bu yılın tüm ayları için plan mevcut; başka bir yıl seçin." : ""}
+        </p>
+      ) : null}
+      {fieldMessage ? (
+        <p id="plan-month-error" role="alert" className="w-full text-sm text-red-700">
+          {fieldMessage}
+        </p>
+      ) : null}
+      {error && error !== fieldMessage ? (
         <p role="alert" className="w-full text-sm text-red-700">
           {error}
         </p>
