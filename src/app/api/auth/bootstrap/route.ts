@@ -14,7 +14,49 @@ async function hasExistingUser(client: NonNullable<ReturnType<typeof adminClient
   return data.users.length > 0;
 }
 
+/**
+ * Hedef proje korumasi: bootstrap yalnizca EXPECTED_SUPABASE_PROJECT_REF ile belirtilen projeye
+ * karsi calisir. Ref eksik/gecersizse, SUPABASE_URL `<ref>.supabase.co` degilse veya
+ * NEXT_PUBLIC_SUPABASE_URL ayni host'a isaret etmiyorsa istek 503 ile durdurulur (fail-closed).
+ * Yanitlarda ve loglarda yalnizca neden kodu yer alir; anahtar/URL degeri yazilmaz.
+ */
+const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
+
+function projectHost(value: string | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
+  if (url.pathname !== "/" || url.search || url.hash) return null;
+  return url.hostname;
+}
+
+function targetGuard(): NextResponse | null {
+  const reason = (() => {
+    const ref = process.env.EXPECTED_SUPABASE_PROJECT_REF?.trim();
+    if (!ref) return "expected_ref_missing";
+    if (!PROJECT_REF_PATTERN.test(ref)) return "expected_ref_invalid";
+    const serverHost = projectHost(process.env.SUPABASE_URL);
+    if (!serverHost) return "server_url_invalid";
+    if (serverHost !== `${ref}.supabase.co`) return "server_url_ref_mismatch";
+    const publicHost = projectHost(process.env.NEXT_PUBLIC_SUPABASE_URL);
+    if (!publicHost) return "public_url_invalid";
+    if (publicHost !== serverHost) return "public_url_mismatch";
+    return null;
+  })();
+  if (!reason) return null;
+  console.error(`[auth/bootstrap] Hedef proje korumasi istegi durdurdu: ${reason}`);
+  return NextResponse.json({ error: "Bootstrap hedef proje korumasi nedeniyle devre disi." }, { status: 503 });
+}
+
 export async function GET() {
+  const blocked = targetGuard();
+  if (blocked) return NextResponse.json({ canBootstrap: false }, { status: blocked.status });
   try {
     const client = adminClient();
     if (!client) return NextResponse.json({ canBootstrap: false }, { status: 503 });
@@ -26,6 +68,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const blocked = targetGuard();
+  if (blocked) return blocked;
   const client = adminClient();
   if (!client) return NextResponse.json({ error: "İlk hesap kurulumu yapılandırılmamış." }, { status: 503 });
   const body = await request.json().catch(() => null);
