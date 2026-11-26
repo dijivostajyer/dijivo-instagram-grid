@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { CalendarAccessError } from "@/lib/calendar-store";
+import { assertCalendarScope, assertPostInBrand, authenticateCalendarRequest } from "@/lib/calendar-authz";
 import { validateCalendarPatch } from "@/lib/calendar-utils";
 import { getCalendarStore } from "../../_store";
 
@@ -21,25 +22,38 @@ export async function PATCH(
 ): Promise<NextResponse> {
   const store = getCalendarStore();
   if (!store) return notConfigured();
+  const auth = await authenticateCalendarRequest(request);
+  if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
   const brandId = searchParams.get("brandId") ?? "";
   if (!brandId.trim()) {
     return clientError("Marka bilgisi gerekli.", 400);
   }
+  // Kayıt yalnızca yetkili markanın kapsamında güncellenir (sürücü id + brand_id ile süzer).
+  const denied = await assertCalendarScope(auth.userId, { brandId });
+  if (denied) return denied;
   const { id } = await params;
   try {
-    const parsed: unknown = await request.json();
+    // Geçersiz JSON gövdesi 500 değil kontrollü 400 döner.
+    const parsed: unknown = await request.json().catch(() => undefined);
+    if (parsed === undefined) return clientError("Geçersiz istek gövdesi.", 400);
     const patch =
       typeof parsed === "object" && parsed !== null
         ? (parsed as Record<string, unknown>)
         : {};
     const error = validateCalendarPatch({
+      postId: patch.postId,
       title: patch.title === undefined ? undefined : String(patch.title),
       scheduledAt: patch.scheduledAt === undefined ? undefined : String(patch.scheduledAt),
       status: patch.status === undefined ? undefined : (patch.status as never),
       itemType: patch.itemType === undefined ? undefined : (patch.itemType as never),
     });
     if (error) return clientError(error, 400);
+    // Gönderi bağlantısı değiştiriliyorsa yeni gönderi bu markaya ve kullanıcıya ait olmalı.
+    if (typeof patch.postId === "string" && patch.postId.trim() !== "") {
+      const postDenied = await assertPostInBrand(auth.userId, brandId, patch.postId);
+      if (postDenied) return postDenied;
+    }
     const item = await store.update(id, patch as never, brandId);
     return NextResponse.json({ item });
   } catch (error) {
@@ -61,11 +75,15 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const store = getCalendarStore();
   if (!store) return notConfigured();
+  const auth = await authenticateCalendarRequest(request);
+  if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
   const brandId = searchParams.get("brandId") ?? "";
   if (!brandId.trim()) {
     return clientError("Marka bilgisi gerekli.", 400);
   }
+  const denied = await assertCalendarScope(auth.userId, { brandId });
+  if (denied) return denied;
   const { id } = await params;
   try {
     await store.remove(id, brandId);

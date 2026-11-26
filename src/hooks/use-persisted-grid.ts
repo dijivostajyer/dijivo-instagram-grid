@@ -236,6 +236,10 @@ export interface PersistedGrid {
   ready: boolean;
   /** Uzak workspace yazımı başarısız olursa kullanıcıya gösterilecek hata. */
   syncError: string | null;
+  /** Bekleyen bulut yazımı kalmadığında artan sayaç (takvim gibi buluta bağımlı okumaları yeniden denemek için). */
+  syncSettledTick: number;
+  /** Şu an kuyrukta/yolda bulut yazımı var mı? */
+  isCloudSyncPending: () => boolean;
   /** Marka kayıt defteri (tüm markalar). */
   brands: Brand[];
   /** Aktif marka kimliği; boşsa henüz marka yoktur (onboarding). */
@@ -308,6 +312,8 @@ export function usePersistedGrid(): PersistedGrid {
   const [ready, setReady] = useState(false);
   const [uploadTick, setUploadTick] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // Her "bekleyen bulut yazımı kalmadı" anında artar (bkz. persist efektinin finally'si).
+  const [syncSettledTick, setSyncSettledTick] = useState(0);
 
   const refByObjectUrl = useRef<Map<string, string>>(new Map());
   const trackedObjectUrls = useRef<Set<string>>(new Set());
@@ -336,6 +342,9 @@ export function usePersistedGrid(): PersistedGrid {
   const planConflictNoticeRef = useRef<string | null>(null);
 
   stateRef.current = state;
+
+  /** Kuyrukta veya yolda bulut yazımı var mı? (Başarısız olmuş eski yazım bekleyen sayılmaz.) */
+  const isCloudSyncPending = useCallback(() => pendingPushesRef.current > 0, []);
 
   // Veritabanı aynı marka/ay/yıl için ikinci planı reddetti (eşzamanlı istek veya eski veri):
   // buluttaki gerçek liste yeniden okunur, hiç kaydedilememiş yerel plan sahte kayıt olarak
@@ -552,6 +561,9 @@ export function usePersistedGrid(): PersistedGrid {
         })
         .finally(() => {
           pendingPushesRef.current -= 1;
+          // Kuyruktaki tüm yazımlar bitti (başarılı ya da başarısız): bulut verisine bağımlı
+          // okumalar (ör. takvim yetkilendirmesi) yeniden denenebilir.
+          if (pendingPushesRef.current === 0) setSyncSettledTick((tick) => tick + 1);
         });
     }
   }, [state, ready, uploadTick, canonicalMedia, recoverProjectMonthConflict]);
@@ -960,6 +972,8 @@ export function usePersistedGrid(): PersistedGrid {
     plannedPosts: state.plannedPosts,
     ready,
     syncError,
+    syncSettledTick,
+    isCloudSyncPending,
     brands: state.brands ?? [],
     activeBrandId: state.activeBrandId ?? "",
     createBrand,

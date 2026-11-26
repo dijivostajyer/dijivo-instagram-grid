@@ -60,6 +60,14 @@ export class CalendarAccessError extends Error {
   }
 }
 
+/** Depo/veritabanı hatası (istemci hatası DEĞİL): API katmanı bunu kontrollü 500 olarak döndürür. */
+export class CalendarStorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CalendarStorageError";
+  }
+}
+
 function rowToItem(row: CalendarItemRow): CalendarItem {
   return {
     id: row.id,

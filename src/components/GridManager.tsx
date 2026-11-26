@@ -82,6 +82,8 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
     plannedPosts,
     ready,
     syncError,
+    syncSettledTick,
+    isCloudSyncPending,
     brands,
     activeBrandId,
     createBrand,
@@ -127,6 +129,10 @@ export default function GridManager({ userEmail, onLogout }: { userEmail: string
   const calendar = useCalendarStore({
     brandId: activeBrandId ?? "",
     projectId: activeProjectId,
+    // Takvim API'si marka/planın bulutta kayıtlı olmasını ister; yeni kayıtlar eşitlenirken
+    // oluşan geçici 404 eşitleme bitince yeniden denenir (bkz. use-calendar-store).
+    isSyncPending: isCloudSyncPending,
+    syncSettledTick,
   });
 
   const grid = useMemo(
